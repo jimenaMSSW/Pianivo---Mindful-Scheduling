@@ -3,123 +3,296 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Owner Dashboard | Pianivo</title>
+    
     <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
     <script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
 
     <style>
         :root {
-            --primary: #2c3e50;
-            --accent: #3498db;
-            --success: #27ae60;
-            --danger: #e74c3c;
-            --light: #ecf0f1;
+            --primary: #1e293b;   /* Dark Navy */
+            --accent: #3498db;    /* Blue */
+            --success: #27ae60;   /* Green */
+            --danger: #e74c3c;    /* Red */
+            --light-bg: #f1f5f9;
+            --sidebar-width: 280px;
         }
-        body { font-family: 'Segoe UI', sans-serif; margin: 0; background-color: #f4f7f6; display: flex; }
-        
-        .sidebar { width: 280px; background: var(--primary); color: white; min-height: 100vh; padding: 20px; position: fixed; box-sizing: border-box; }
-        .main-content { margin-left: 280px; padding: 30px; width: calc(100% - 280px); box-sizing: border-box; }
 
-        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 25px; }
-        
-        /* Master Switch Styling */
-        .switch-container { display: flex; align-items: center; justify-content: space-between; background: #fff3cd; padding: 15px; border-radius: 8px; border: 1px solid #ffeeba; margin-bottom: 20px; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            margin: 0; 
+            background-color: var(--light-bg); 
+            display: flex;
+            overflow-x: hidden;
+        }
+
+        /* --- SIDEBAR STYLING --- */
+        .sidebar { 
+            width: var(--sidebar-width); 
+            background: var(--primary); 
+            color: white; 
+            height: 100vh; 
+            padding: 25px; 
+            position: fixed; 
+            left: 0;
+            top: 0;
+            box-sizing: border-box; 
+            z-index: 1000;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 4px 0 10px rgba(0,0,0,0.1);
+        }
+
+        .sidebar.collapsed {
+            transform: translateX(-100%);
+        }
+
+        /* --- MAIN CONTENT STYLING --- */
+        .main-content { 
+            margin-left: var(--sidebar-width); 
+            padding: 40px; 
+            width: calc(100% - var(--sidebar-width)); 
+            box-sizing: border-box; 
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .main-content.expanded {
+            margin-left: 0;
+            width: 100%;
+        }
+
+        /* --- UI COMPONENTS --- */
+        .card { 
+            background: white; 
+            padding: 20px; 
+            border-radius: 12px; 
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05); 
+            margin-bottom: 25px; 
+        }
+
+        .toggle-sidebar-btn {
+            position: fixed;
+            left: 20px;
+            bottom: 20px;
+            z-index: 2000;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            transition: transform 0.2s;
+        }
+
+        .toggle-sidebar-btn:hover { transform: scale(1.1); }
+
+        /* --- CALENDAR CUSTOMIZATION (50px FIXED HEIGHT) --- */
+        #calendar { background: white; border-radius: 8px; padding: 10px; }
+
+        .fc-timegrid-event {
+            min-height: 50px !important;
+            max-height: 50px !important;
+            border: none !important;
+            border-radius: 6px !important;
+        }
+
+        .fc-event-main {
+            display: flex !important;
+            align-items: center !important;
+            padding: 0 8px !important;
+        }
+
+        .fc-event-title {
+            font-size: 12px !important;
+            font-weight: 600 !important;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .fc-event-time { font-size: 10px !important; margin-right: 5px; opacity: 0.8; }
+
+        /* --- LIST VIEW STYLING --- */
+        .list-table { width: 100%; border-collapse: collapse; }
+        .list-table th { text-align: left; padding: 12px; color: #64748b; border-bottom: 2px solid #f1f5f9; }
+        .list-table td { padding: 15px 12px; border-bottom: 1px solid #f1f5f9; }
+
+        /* --- FORMS & SWITCHES --- */
+        .switch-container { 
+            display: flex; align-items: center; justify-content: space-between; 
+            background: #fffbeb; padding: 20px; border-radius: 12px; 
+            border: 1px solid #fde68a; margin-bottom: 25px; 
+        }
+
+        .grid-form { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); 
+            gap: 15px; 
+        }
+
+        input, select { padding: 12px; border: 1px solid #cbd5e1; border-radius: 8px; }
+
+        .btn-primary { 
+            background: var(--accent); color: white; border: none; 
+            padding: 12px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; 
+        }
+
+        .toggle-group { background: #e2e8f0; padding: 5px; border-radius: 10px; display: inline-flex; }
+        .toggle-btn { border: none; padding: 8px 18px; border-radius: 7px; cursor: pointer; font-weight: 600; background: transparent; color: #475569; }
+        .toggle-btn.active { background: white; color: var(--primary); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+
+        /* Toggle Switch Slider */
         .switch { position: relative; display: inline-block; width: 44px; height: 22px; }
         .switch input { opacity: 0; width: 0; height: 0; }
-        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .4s; border-radius: 34px; }
         .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
         input:checked + .slider { background-color: var(--success); }
         input:checked + .slider:before { transform: translateX(22px); }
-
-        #calendar { min-height: 800px; }
-        .grid-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
-        input, select { padding: 10px; border: 1px solid #ddd; border-radius: 6px; }
-        .btn-add { background: var(--accent); color: white; border: none; padding: 10px; border-radius: 6px; cursor: pointer; font-weight: bold; }
-        
-        /* FullCalendar Overrides */
-        .fc-header-toolbar { margin-bottom: 20px !important; }
-        .fc-button-primary { background-color: var(--primary) !important; border-color: var(--primary) !important; }
     </style>
 </head>
 <body>
 
-<div class="sidebar">
-    <h2>Pianivo Admin</h2>
-    <p style="font-size: 0.9em; opacity: 0.8;">Owner: {{ request.user.username }}</p>
-    <hr style="border: 0.5px solid rgba(255,255,255,0.1); margin: 20px 0;">
-    
-    <h4>Filters</h4>
-    <form method="get">
-        <select name="status" onchange="this.form.submit()" style="width: 100%; margin-bottom: 10px;">
-            <option value="">All Statuses</option>
-            <option value="pending" {% if status_filter == "pending" %}selected{% endif %}>Pending</option>
-            <option value="confirmed" {% if status_filter == "confirmed" %}selected{% endif %}>Confirmed</option>
-        </select>
-        
-        <select name="employee" onchange="this.form.submit()" style="width: 100%;">
-            <option value="">All Staff</option>
-            {% for e in employees %}
-                <option value="{{ e.id }}" {% if employee_filter == e.id|stringformat:"s" %}selected{% endif %}>{{ e.user.username }}</option>
-            {% endfor %}
-        </select>
-        <p><a href="." style="color: #3498db; text-decoration: none; font-size: 0.8em;">Clear Filters</a></p>
-    </form>
-</div>
+    <button class="toggle-sidebar-btn" onclick="toggleSidebar()" title="Toggle Admin Panel">☰</button>
 
-<div class="main-content">
-    <div class="switch-container">
-        <div>
-            <strong>Employee Autonomy</strong><br>
-            <small>When on, staff can add/remove their own bookings.</small>
+    <div class="sidebar" id="sidebar">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+            <h2 style="margin:0; font-size: 1.4em; letter-spacing: 1px;">Pianivo</h2>
+            <button onclick="toggleSidebar()" style="background:none; border:none; color:white; cursor:pointer; font-size: 1.2em;">◀</button>
         </div>
-        <label class="switch">
-            <input type="checkbox" id="master-switch" 
-                   {% if user_business.employees_can_manage_appointments %}checked{% endif %}
-                   onchange="togglePermissions(this.checked)">
-            <span class="slider"></span>
-        </label>
-    </div>
-
-    <div class="card">
-        <div id="calendar"></div>
-    </div>
-
-    <div class="card">
-        <h3>Quick Book</h3>
-        <form id="owner-add-form" class="grid-form">
-            <input type="text" name="customer_name" placeholder="Customer Name" required>
-            <select name="employee_id">
-                <option value="">Assign Staff</option>
+        
+        <p style="opacity: 0.7; font-size: 0.9em;">Logged in as: <strong>{{ request.user.username }}</strong></p>
+        <hr style="border: 0.5px solid rgba(255,255,255,0.1); margin: 20px 0;">
+        
+        <h4 style="margin-bottom: 15px;">Filters</h4>
+        <form method="get">
+            <label style="font-size: 0.8em; display:block; margin-bottom: 5px;">Status</label>
+            <select name="status" onchange="this.form.submit()" style="width: 100%; margin-bottom: 15px; background: #334155; color: white; border: none;">
+                <option value="">All Statuses</option>
+                <option value="pending" {% if status_filter == "pending" %}selected{% endif %}>Pending</option>
+                <option value="confirmed" {% if status_filter == "confirmed" %}selected{% endif %}>Confirmed</option>
+            </select>
+            
+            <label style="font-size: 0.8em; display:block; margin-bottom: 5px;">Employee</label>
+            <select name="employee" onchange="this.form.submit()" style="width: 100%; background: #334155; color: white; border: none;">
+                <option value="">All Staff</option>
                 {% for e in employees %}
-                    <option value="{{ e.id }}">{{ e.user.username }}</option>
+                    <option value="{{ e.id }}" {% if employee_filter == e.id|stringformat:"s" %}selected{% endif %}>{{ e.user.username }}</option>
                 {% endfor %}
             </select>
-            <input type="datetime-local" name="start_time" required>
-            <input type="datetime-local" name="end_time" required>
-            <button type="submit" class="btn-add">Add Appointment</button>
+            <p style="margin-top: 20px;"><a href="." style="color: var(--accent); text-decoration: none; font-size: 0.85em;">↺ Reset Filters</a></p>
         </form>
     </div>
-</div>
+
+    <div class="main-content" id="main-content">
+        
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+            <h1 style="margin:0; color: var(--primary);">Schedule Overview</h1>
+            <div class="toggle-group">
+                <button id="btn-calendar" class="toggle-btn active" onclick="switchView('calendar')">Calendar</button>
+                <button id="btn-list" class="toggle-btn" onclick="switchView('list')">List View</button>
+            </div>
+        </div>
+
+        <div class="switch-container">
+            <div>
+                <strong style="color: #92400e;">Employee Autonomy</strong><br>
+                <small style="color: #b45309;">When active, staff members can manage their own bookings.</small>
+            </div>
+            <label class="switch">
+                <input type="checkbox" id="master-switch" 
+                       {% if user_business.employees_can_manage_appointments %}checked{% endif %}
+                       onchange="togglePermissions(this.checked)">
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div id="calendar-container">
+            <div class="card">
+                <div id="calendar"></div>
+            </div>
+        </div>
+
+        <div id="list-container" style="display: none;">
+            <div class="card">
+                <table class="list-table">
+                    <thead>
+                        <tr>
+                            <th>Customer</th>
+                            <th>Date & Time</th>
+                            <th>Employee</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for a in appointments %}
+                        <tr>
+                            <td><strong>{{ a.customer_name }}</strong></td>
+                            <td>{{ a.start_time|date:"M d, Y" }} at {{ a.start_time|date:"P" }}</td>
+                            <td>{{ a.employee.user.username }}</td>
+                            <td>
+                                <span style="font-weight: bold; color: {% if a.status == 'confirmed' %}var(--success){% else %}#d97706{% endif %};">
+                                    {{ a.status|capfirst }}
+                                </span>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="4" style="text-align: center; color: #94a3b8;">No appointments match your filters.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3 style="margin-top: 0; color: var(--primary);">Quick Book</h3>
+            <form id="owner-add-form" class="grid-form">
+                <input type="text" name="customer_name" placeholder="Customer Name" required>
+                <select name="employee_id" required>
+                    <option value="">Assign Employee</option>
+                    {% for e in employees %}
+                        <option value="{{ e.id }}">{{ e.user.username }}</option>
+                    {% endfor %}
+                </select>
+                <input type="datetime-local" name="start_time" required title="Start Time">
+                <input type="datetime-local" name="end_time" required title="End Time">
+                <button type="submit" class="btn-primary">Book Now</button>
+            </form>
+        </div>
+    </div>
 
 <script>
+let calendar; 
+
 $(document).ready(function(){
+    // Django CSRF Setup
     $.ajaxSetup({ headers: { "X-CSRFToken": "{{ csrf_token }}" } });
 
+    // Initialize FullCalendar
     const calendarEl = document.getElementById('calendar');
-    const calendar = new FullCalendar.Calendar(calendarEl, {
-        initialView: 'timeGridDay', // FIX: Opens in Daily View
+    calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: 'timeGridDay',
         headerToolbar: {
             left: 'prev,next today',
             center: 'title',
-            right: 'dayGridMonth,timeGridWeek,timeGridDay' // FIX: Adds Daily View button
+            right: 'dayGridMonth,timeGridWeek,timeGridDay'
         },
         slotMinTime: "08:00:00",
-        slotMaxTime: "21:00:00",
+        slotMaxTime: "22:00:00",
         allDaySlot: false,
         height: 'auto',
         editable: true,
+        // --- Uniform Sizing Logic ---
+        defaultTimedEventDuration: '01:00',
+        forceEventDuration: true,
+        displayEventEnd: false,
+        // ---------------------------
         events: {{ events_json|safe }},
-        
         eventDrop: function(info) {
             $.ajax({
                 url: `/owner/appointments/${info.event.id}/reschedule/`,
@@ -129,13 +302,13 @@ $(document).ready(function(){
                     start_time: info.event.start.toISOString(),
                     end_time: info.event.end ? info.event.end.toISOString() : info.event.start.toISOString()
                 }),
-                error: function() { info.revert(); alert("Update failed."); }
+                error: function() { info.revert(); alert("Could not save new time."); }
             });
         }
     });
     calendar.render();
 
-    // Add Appointment
+    // AJAX Form Submission
     $("#owner-add-form").submit(function(e){
         e.preventDefault();
         const data = {
@@ -153,6 +326,41 @@ $(document).ready(function(){
         });
     });
 });
+
+// SIDEBAR TOGGLE LOGIC
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const content = document.getElementById('main-content');
+    
+    sidebar.classList.toggle('collapsed');
+    content.classList.toggle('expanded');
+
+    // Resize calendar after animation
+    if (calendar) {
+        setTimeout(() => { calendar.updateSize(); }, 350);
+    }
+}
+
+// VIEW SWITCH LOGIC
+function switchView(viewType) {
+    const calCont = document.getElementById('calendar-container');
+    const listCont = document.getElementById('list-container');
+    const btnCal = document.getElementById('btn-calendar');
+    const btnList = document.getElementById('btn-list');
+
+    if (viewType === 'calendar') {
+        calCont.style.display = 'block';
+        listCont.style.display = 'none';
+        btnCal.classList.add('active');
+        btnList.classList.remove('active');
+        if (calendar) { calendar.updateSize(); }
+    } else {
+        calCont.style.display = 'none';
+        listCont.style.display = 'block';
+        btnList.classList.add('active');
+        btnCal.classList.remove('active');
+    }
+}
 
 function togglePermissions(isEnabled) {
     $.post("{% url 'owner:toggle_permissions' %}", { 'enabled': isEnabled });

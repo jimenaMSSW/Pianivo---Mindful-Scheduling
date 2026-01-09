@@ -21,15 +21,17 @@ def employee_dashboard(request):
     for a in appointments:
         events.append({
             "id": str(a.id),
-            "title": f"Appt: {a.customer_name}",
+            "title": a.customer_name,
             "start": a.start_time.isoformat(),
-            "end": a.end_time.isoformat(),
+            #"end": a.end_time.isoformat(),
             "backgroundColor": employee.color or "#3498db",
             "borderColor": employee.color or "#3498db",
-            "textColor": "#ffffff"
+            "textColor": "#000000"
         })
 
     return render(request, "employee/dashboard.html", {
+        "appointments": appointments.order_by("start_time"), # This is for the List View
+        "events_json": json.dumps(events),                 # This is for the Calendar
         "appointments": appointments,
         "events_json": json.dumps(events),
         "employee": employee

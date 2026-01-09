@@ -50,13 +50,15 @@ def dashboard(request):
             "id": str(a.id),
             "title": f"{a.customer_name} ({a.employee.user.username if a.employee else 'Unassigned'})",
             "start": a.start_time.isoformat(),
-            "end": a.end_time.isoformat(),
+            #"end": a.end_time.isoformat(),
             "backgroundColor": color,
             "borderColor": color,
-            "textColor": "#ffffff"
+            "textColor": "#000000"
         })
 
     return render(request, "owner/dashboard.html", {
+        "appointments": appointments.order_by("start_time"), # This is for the List View
+        "events_json": json.dumps(events),                 # This is for the Calendar
         "user_business": user_business,
         "appointments": appointments.order_by("start_time"),
         "employees": BusinessEmployee.objects.filter(business=user_business),
