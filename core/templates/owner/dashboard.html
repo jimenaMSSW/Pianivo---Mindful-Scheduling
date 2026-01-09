@@ -1,0 +1,163 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Owner Dashboard | Pianivo</title>
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
+
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --accent: #3498db;
+            --success: #27ae60;
+            --danger: #e74c3c;
+            --light: #ecf0f1;
+        }
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; background-color: #f4f7f6; display: flex; }
+        
+        .sidebar { width: 280px; background: var(--primary); color: white; min-height: 100vh; padding: 20px; position: fixed; box-sizing: border-box; }
+        .main-content { margin-left: 280px; padding: 30px; width: calc(100% - 280px); box-sizing: border-box; }
+
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 25px; }
+        
+        /* Master Switch Styling */
+        .switch-container { display: flex; align-items: center; justify-content: space-between; background: #fff3cd; padding: 15px; border-radius: 8px; border: 1px solid #ffeeba; margin-bottom: 20px; }
+        .switch { position: relative; display: inline-block; width: 44px; height: 22px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }
+        .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--success); }
+        input:checked + .slider:before { transform: translateX(22px); }
+
+        #calendar { min-height: 800px; }
+        .grid-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+        input, select { padding: 10px; border: 1px solid #ddd; border-radius: 6px; }
+        .btn-add { background: var(--accent); color: white; border: none; padding: 10px; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        
+        /* FullCalendar Overrides */
+        .fc-header-toolbar { margin-bottom: 20px !important; }
+        .fc-button-primary { background-color: var(--primary) !important; border-color: var(--primary) !important; }
+    </style>
+</head>
+<body>
+
+<div class="sidebar">
+    <h2>Pianivo Admin</h2>
+    <p style="font-size: 0.9em; opacity: 0.8;">Owner: {{ request.user.username }}</p>
+    <hr style="border: 0.5px solid rgba(255,255,255,0.1); margin: 20px 0;">
+    
+    <h4>Filters</h4>
+    <form method="get">
+        <select name="status" onchange="this.form.submit()" style="width: 100%; margin-bottom: 10px;">
+            <option value="">All Statuses</option>
+            <option value="pending" {% if status_filter == "pending" %}selected{% endif %}>Pending</option>
+            <option value="confirmed" {% if status_filter == "confirmed" %}selected{% endif %}>Confirmed</option>
+        </select>
+        
+        <select name="employee" onchange="this.form.submit()" style="width: 100%;">
+            <option value="">All Staff</option>
+            {% for e in employees %}
+                <option value="{{ e.id }}" {% if employee_filter == e.id|stringformat:"s" %}selected{% endif %}>{{ e.user.username }}</option>
+            {% endfor %}
+        </select>
+        <p><a href="." style="color: #3498db; text-decoration: none; font-size: 0.8em;">Clear Filters</a></p>
+    </form>
+</div>
+
+<div class="main-content">
+    <div class="switch-container">
+        <div>
+            <strong>Employee Autonomy</strong><br>
+            <small>When on, staff can add/remove their own bookings.</small>
+        </div>
+        <label class="switch">
+            <input type="checkbox" id="master-switch" 
+                   {% if user_business.employees_can_manage_appointments %}checked{% endif %}
+                   onchange="togglePermissions(this.checked)">
+            <span class="slider"></span>
+        </label>
+    </div>
+
+    <div class="card">
+        <div id="calendar"></div>
+    </div>
+
+    <div class="card">
+        <h3>Quick Book</h3>
+        <form id="owner-add-form" class="grid-form">
+            <input type="text" name="customer_name" placeholder="Customer Name" required>
+            <select name="employee_id">
+                <option value="">Assign Staff</option>
+                {% for e in employees %}
+                    <option value="{{ e.id }}">{{ e.user.username }}</option>
+                {% endfor %}
+            </select>
+            <input type="datetime-local" name="start_time" required>
+            <input type="datetime-local" name="end_time" required>
+            <button type="submit" class="btn-add">Add Appointment</button>
+        </form>
+    </div>
+</div>
+
+<script>
+$(document).ready(function(){
+    $.ajaxSetup({ headers: { "X-CSRFToken": "{{ csrf_token }}" } });
+
+    const calendarEl = document.getElementById('calendar');
+    const calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: 'timeGridDay', // FIX: Opens in Daily View
+        headerToolbar: {
+            left: 'prev,next today',
+            center: 'title',
+            right: 'dayGridMonth,timeGridWeek,timeGridDay' // FIX: Adds Daily View button
+        },
+        slotMinTime: "08:00:00",
+        slotMaxTime: "21:00:00",
+        allDaySlot: false,
+        height: 'auto',
+        editable: true,
+        events: {{ events_json|safe }},
+        
+        eventDrop: function(info) {
+            $.ajax({
+                url: `/owner/appointments/${info.event.id}/reschedule/`,
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    start_time: info.event.start.toISOString(),
+                    end_time: info.event.end ? info.event.end.toISOString() : info.event.start.toISOString()
+                }),
+                error: function() { info.revert(); alert("Update failed."); }
+            });
+        }
+    });
+    calendar.render();
+
+    // Add Appointment
+    $("#owner-add-form").submit(function(e){
+        e.preventDefault();
+        const data = {
+            customer_name: $('[name="customer_name"]').val(),
+            employee_id: $('[name="employee_id"]').val(),
+            start_time: $('[name="start_time"]').val(),
+            end_time: $('[name="end_time"]').val(),
+        };
+        $.ajax({
+            url: "{% url 'owner:add_appointment' %}",
+            type: "POST",
+            contentType: "application/json",
+            data: JSON.stringify(data),
+            success: function(){ location.reload(); }
+        });
+    });
+});
+
+function togglePermissions(isEnabled) {
+    $.post("{% url 'owner:toggle_permissions' %}", { 'enabled': isEnabled });
+}
+</script>
+
+</body>
+</html>

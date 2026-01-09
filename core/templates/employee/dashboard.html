@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>My Schedule | Pianivo</title>
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; background: #f4f7f6; padding: 20px; }
+        .container { max-width: 1000px; margin: 0 auto; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        .btn { padding: 10px 20px; border-radius: 6px; border: none; cursor: pointer; font-weight: bold; }
+        .btn-add { background: #3498db; color: white; }
+        #calendar { background: white; padding: 15px; border-radius: 12px; }
+        .status-badge { padding: 4px 8px; border-radius: 4px; font-size: 0.8em; background: #eee; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h1>Hello, {{ employee.user.username }}</h1>
+        <a href="/admin/logout/" style="text-decoration: none; color: #e74c3c;">Logout</a>
+    </div>
+
+    {% if employee.business.employees_can_manage_appointments %}
+    <div class="card">
+        <h3>Book New Appointment</h3>
+        <form id="add-appt-form" style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 10px;">
+            <input type="text" id="cust_name" placeholder="Customer Name" required style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            <input type="datetime-local" id="start_time" required style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            <input type="datetime-local" id="end_time" required style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            <button type="submit" class="btn btn-add">Add</button>
+        </form>
+    </div>
+    {% else %}
+    <div class="card" style="background: #fff3cd; border: 1px solid #ffeeba;">
+        <p style="margin: 0; color: #856404;"><strong>Note:</strong> Self-management is currently disabled by the owner.</p>
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <h3>My Weekly Schedule</h3>
+        <div id="calendar"></div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const calendarEl = document.getElementById('calendar');
+        const calendar = new FullCalendar.Calendar(calendarEl, {
+            initialView: 'timeGridWeek',
+            headerToolbar: { left: 'prev,next today', center: 'title', right: 'timeGridWeek,timeGridDay' },
+            events: {{ events_json|safe }},
+            allDaySlot: false,
+            slotMinTime: "08:00:00",
+            slotMaxTime: "20:00:00",
+            // Allow deletion on click if permitted
+            eventClick: function(info) {
+                {% if employee.business.employees_can_manage_appointments %}
+                if(confirm("Delete this appointment?")) {
+                    $.post(`/employee/appointments/${info.event.id}/delete/`, function() {
+                        location.reload();
+                    });
+                }
+                {% endif %}
+            }
+        });
+        calendar.render();
+
+        // Handle Add Form
+        $("#add-appt-form").submit(function(e){
+            e.preventDefault();
+            const data = {
+                customer_name: $("#cust_name").val(),
+                start_time: $("#start_time").val(),
+                end_time: $("#end_time").val()
+            };
+            $.ajax({
+                url: "{% url 'employee_add_appointment' %}",
+                type: "POST",
+                headers: { "X-CSRFToken": "{{ csrf_token }}" },
+                contentType: "application/json",
+                data: JSON.stringify(data),
+                success: function() { location.reload(); },
+                error: function(xhr) { alert(xhr.responseJSON.error); }
+            });
+        });
+    });
+</script>
+
+</body>
+</html>
