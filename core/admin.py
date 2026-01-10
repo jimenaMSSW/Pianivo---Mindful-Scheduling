@@ -3,7 +3,7 @@ from django.utils import timezone
 from django.utils.html import format_html
 from django.urls import path
 from django.shortcuts import redirect, get_object_or_404
-from .models import Appointment, Business, BusinessEmployee
+from .models import Appointment, Business, Employee
 
 @admin.register(Appointment)
 class AppointmentAdmin(admin.ModelAdmin):
@@ -83,7 +83,7 @@ class BusinessAdmin(admin.ModelAdmin):
     search_fields = ("name",)
 
 
-@admin.register(BusinessEmployee)
+@admin.register(Employee)
 class BusinessEmployeeAdmin(admin.ModelAdmin):
     list_display = ("user", "business")
     search_fields = ("user__username", "business__name")

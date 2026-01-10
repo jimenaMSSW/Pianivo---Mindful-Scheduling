@@ -1,15 +1,22 @@
 from django.urls import path
-from core.views.owner import dashboard, confirm_appointment, reject_appointment, reschedule_appointment, update_appointment, add_appointment
-from core.views import owner as views
+from core.views import views  # This is where all your dashboard logic lives
 
 app_name = "owner"
 
 urlpatterns = [
-    path("", dashboard, name="dashboard"),
-    path("appointments/<int:appointment_id>/confirm/", confirm_appointment, name="confirm_appointment"),
-    path("appointments/<int:appointment_id>/reject/", reject_appointment, name="reject_appointment"),
-    path("appointments/<int:appointment_id>/reschedule/", reschedule_appointment, name="reschedule_appointment"),
-    path("appointments/<int:appointment_id>/update/", update_appointment, name="update_appointment"),
-    path("appointments/add/", add_appointment, name="add_appointment"),
+    # Main Dashboard
+    path('dashboard/', views.owner_dashboard, name='owner_dashboard'),
+    
+    # --- YOUR ORIGINAL CONFIRM/REJECT PATHS ---
+    path("appointments/<int:appointment_id>/confirm/", views.confirm_appointment, name="confirm_appointment"),
+    path("appointments/<int:appointment_id>/reject/", views.reject_appointment, name="reject_appointment"),
+    
+    # --- RESCHEDULE & UPDATE PATHS ---
+    # Make sure you have 'reschedule_appointment' and 'update_appointment' defined in views.py
+    path("appointments/<int:appointment_id>/reschedule/", views.owner_dashboard, name="reschedule_appointment"), 
+    path("appointments/<int:appointment_id>/update/", views.owner_dashboard, name="update_appointment"),
+    
+    # --- ADD & SETTINGS ---
+    path("appointments/add/", views.owner_dashboard, name="add_appointment"),
     path("settings/toggle-permissions/", views.toggle_permissions, name="toggle_permissions"),
 ]

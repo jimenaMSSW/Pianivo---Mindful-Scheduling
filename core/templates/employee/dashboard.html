@@ -5,10 +5,29 @@
     <meta charset="UTF-8">
     <title>My Schedule | Pianivo</title>
     
-    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
     <script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
     
+    <link rel="manifest" href="{% static 'manifest.json' %}">
+    <meta name="theme-color" content="#1e293b">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
     <style>
+        @media (max-width: 768px) {
+    .sidebar {
+        transform: translateX(-100%); /* Start hidden on mobile */
+    }
+    .main-content {
+        margin-left: 0;
+        width: 100%;
+        padding: 15px; /* Less padding on small screens */
+    }
+    .sidebar.collapsed {
+        transform: translateX(0); /* Show when toggled on mobile */
+        width: 100%; /* Fill screen on mobile when open */
+    }
+    }
         /* MAIN LAYOUT: Basic page styling */
         body { font-family: 'Segoe UI', sans-serif; margin: 0; background: #f4f7f6; padding: 20px; }
         .container { max-width: 1000px; margin: 0 auto; }
@@ -237,7 +256,13 @@
             btnCal.classList.remove('active');
         }
     }
+    
 </script>
-
+<script>
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register("{% static 'serviceworker.js' %}")
+          .then(() => console.log("Pianivo App Ready"));
+    }
+</script>
 </body>
 </html>

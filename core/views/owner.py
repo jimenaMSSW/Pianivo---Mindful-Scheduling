@@ -7,6 +7,7 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from core.models import Appointment, BusinessEmployee, Business
+from django.core.exceptions import PermissionDenied
 
 def get_aware_datetime(date_str):
     try:
@@ -135,3 +136,11 @@ def add_appointment(request):
             status='pending'
         )
         return JsonResponse({"success": True})
+    
+
+def owner_dashboard(request):
+    # Security Check: If the user doesn't own a business, block them
+    if not hasattr(request.user, 'business_owned'):
+        raise PermissionDenied  # This shows a "403 Forbidden" page
+    
+    # ... rest of your code ...
