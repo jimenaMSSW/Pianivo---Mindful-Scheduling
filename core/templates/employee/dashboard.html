@@ -3,10 +3,11 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>My Schedule | Pianivo</title>
     
     <script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
     
     <link rel="manifest" href="{% static 'manifest.json' %}">
     <meta name="theme-color" content="#1e293b">
@@ -14,84 +15,50 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
     <style>
-        @media (max-width: 768px) {
-    .sidebar {
-        transform: translateX(-100%); /* Start hidden on mobile */
-    }
-    .main-content {
-        margin-left: 0;
-        width: 100%;
-        padding: 15px; /* Less padding on small screens */
-    }
-    .sidebar.collapsed {
-        transform: translateX(0); /* Show when toggled on mobile */
-        width: 100%; /* Fill screen on mobile when open */
-    }
-    }
-        /* MAIN LAYOUT: Basic page styling */
+        /* MAIN LAYOUT */
         body { font-family: 'Segoe UI', sans-serif; margin: 0; background: #f4f7f6; padding: 20px; }
         .container { max-width: 1000px; margin: 0 auto; }
         .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-        
-        /* CARDS: White boxes used for different sections */
         .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
         
-        /* BUTTONS: Global button styling */
+        /* BUTTONS */
         .btn { padding: 10px 20px; border-radius: 6px; border: none; cursor: pointer; font-weight: bold; }
         .btn-add { background: #3498db; color: white; }
-        
-        /* VIEW TOGGLE: The switch for Calendar vs List view */
-        .dashboard-controls { margin-bottom: 15px; }
+        .confirm-btn { background: #27ae60; color: white; border: none; border-radius: 4px; font-size: 10px; cursor: pointer; padding: 4px 8px; pointer-events: auto !important; }
+        .reject-btn { background: #e74c3c; color: white; border: none; border-radius: 4px; font-size: 10px; cursor: pointer; padding: 4px 8px; pointer-events: auto !important; }
+
+        /* TOGGLE GROUP */
         .toggle-group { background: #eee; padding: 4px; border-radius: 8px; display: inline-flex; }
-        .toggle-btn { border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 600; transition: 0.2s; }
-        /* Active button state */
+        .toggle-btn { border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 600; }
         .toggle-btn.active { background: #3498db; color: white; }
         
-        /* LIST VIEW TABLE: Styling for the appointment list */
-        .list-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        .list-table th { text-align: left; padding: 12px; border-bottom: 2px solid #eee; color: #666; }
-        .list-table td { padding: 12px; border-bottom: 1px solid #eee; }
+        /* CALENDAR CUSTOMIZATION */
+        #calendar { background: white; padding: 15px; border-radius: 12px; min-height: 600px; }
         
-        /* STATUS BADGES: Color coding for appointment status */
-        .status-badge { padding: 4px 8px; border-radius: 4px; font-size: 0.85em; text-transform: capitalize; }
+        .fc-timegrid-event {
+            min-height: 70px !important; /* Extra height to fit buttons */
+            border-radius: 8px !important;
+            border: none !important;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .fc-event-main-container {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            height: 100%;
+            padding: 5px;
+        }
+
+        .fc-event-title { font-size: 12px !important; font-weight: 700; }
+
+        /* LIST VIEW */
+        .list-table { width: 100%; border-collapse: collapse; }
+        .list-table th { text-align: left; padding: 12px; border-bottom: 2px solid #eee; }
+        .list-table td { padding: 12px; border-bottom: 1px solid #eee; }
+        .status-badge { padding: 4px 8px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
         .status-confirmed { background: #d4edda; color: #155724; }
         .status-pending { background: #fff3cd; color: #856404; }
-
-        #calendar { background: white; padding: 15px; border-radius: 12px; min-height: 600px; }
-        /* 1. Adjust the font size to fit the fixed box */
-        
-        .fc-event-title {
-            font-size: 11px !important; /* Slightly smaller font */
-            font-weight: 600;
-            white-space: nowrap;        /* Keeps name on one line */
-            overflow: hidden;           /* Hides extra text */
-            text-overflow: ellipsis;    /* Adds '...' if the name is too long */
-        }
-
-        /* 2. Center the text vertically in your 50px box */
-        .fc-v-event .fc-event-main {
-            display: flex;
-            align-items: center;        /* Centers text top-to-bottom */
-            padding: 0 4px !important;  /* Adds a tiny bit of side breathing room */
-        }
-
-        /* 3. Remove the time display if it's taking up too much room */
-        .fc-event-time {
-            font-size: 10px !important;
-            margin-right: 3px;
-        }
-        /* This is the 'Anchor' that locks the height for every box */
-        .fc-timegrid-event {
-            min-height: 50px !important; /* Forces the box to be 50px tall */
-            max-height: 50px !important; /* Prevents it from growing */
-            border-radius: 4px !important;
-        }
-
-        /* This ensures the month view doesn't get messed up by the 50px rule */
-        .fc-daygrid-event {
-            min-height: 22px !important;
-            max-height: 22px !important;
-        }
     </style>
 </head>
 <body>
@@ -119,29 +86,19 @@
             <button type="submit" class="btn btn-add">Add</button>
         </form>
     </div>
-    {% else %}
-    <div class="card" style="background: #fff3cd; border: 1px solid #ffeeba;">
-        <p style="margin: 0; color: #856404;"><strong>Note:</strong> Self-management is currently disabled by the owner.</p>
-    </div>
     {% endif %}
 
     <div id="calendar-container">
         <div class="card">
-            <h3>My Weekly Schedule</h3>
             <div id="calendar"></div>
         </div>
     </div>
 
     <div id="list-container" style="display: none;">
         <div class="card">
-            <h3>Appointment List</h3>
             <table class="list-table">
                 <thead>
-                    <tr>
-                        <th>Customer</th>
-                        <th>Time</th>
-                        <th>Status</th>
-                    </tr>
+                    <tr><th>Customer</th><th>Time</th><th>Status</th></tr>
                 </thead>
                 <tbody>
                     {% for a in appointments %}
@@ -164,40 +121,68 @@
 </div>
 
 <script>
-    // 1. Declare calendar globally so switchView() can access it
     let calendar; 
 
     document.addEventListener('DOMContentLoaded', function() {
-        // SETUP FULLCALENDAR
-        // SETUP FULLCALENDAR
         const calendarEl = document.getElementById('calendar');
+        
         calendar = new FullCalendar.Calendar(calendarEl, {
-            // initialView can stay as week or month, whichever you prefer as the default
             initialView: 'timeGridWeek', 
+            timeZone: 'America/New_York', // Fixed timezone
             headerToolbar: { 
                 left: 'prev,next today', 
                 center: 'title', 
-                // ADDED 'dayGridMonth' here to make the button appear
                 right: 'dayGridMonth,timeGridWeek,timeGridDay' 
             },
-    
-            // UNIFORM EVENT SIZING
-            defaultTimedEventDuration: '01:30', 
-            forceEventDuration: true,           
-            displayEventEnd: false,             
-    
-            // CALENDAR APPEARANCE
-            events: {{ events_json|safe }}, 
             allDaySlot: false,
             slotMinTime: "08:00:00",
             slotMaxTime: "20:00:00",
-            expandRows: true, // Helps keep the rows even and clean
-    
-            // ACTIONS
+            events: {{ events_json|safe }},
+
+            // INJECT BUTTONS INTO THE EVENT BOX
+            eventContent: function(arg) {
+                let container = document.createElement('div');
+                container.classList.add('fc-event-main-container');
+
+                let title = document.createElement('div');
+                title.innerHTML = `<strong>${arg.event.title}</strong>`;
+                container.appendChild(title);
+
+                // Only show buttons if pending
+                if (arg.event.extendedProps.status === 'pending') {
+                    let buttonGroup = document.createElement('div');
+                    buttonGroup.style.display = 'flex';
+                    buttonGroup.style.gap = '5px';
+                    buttonGroup.innerHTML = `
+                        <button class="confirm-btn">Confirm</button>
+                        <button class="reject-btn">Reject</button>
+                    `;
+                    container.appendChild(buttonGroup);
+                }
+                return { domNodes: [container] };
+            },
+
+            // UNIFIED CLICK LOGIC
             eventClick: function(info) {
+                const target = info.jsEvent.target;
+
+                if (target.closest('.confirm-btn') || target.closest('.reject-btn')) {
+                    info.jsEvent.preventDefault();
+                    info.jsEvent.stopPropagation();
+                    
+                    const appointmentId = info.event.id;
+                    if (target.closest('.confirm-btn')) {
+                        handleConfirm(appointmentId);
+                    } else {
+                        handleReject(appointmentId);
+                    }
+                    return;
+                }
+
+                // Delete logic
                 {% if employee.business.employees_can_manage_appointments %}
                 if(confirm("Delete this appointment?")) {
-                    $.post(`/employee/appointments/${info.event.id}/delete/`, {
+                    $.post(`/owner/appointments/${info.event.id}/delete/`, {
                         "csrfmiddlewaretoken": "{{ csrf_token }}"
                     }, function() {
                         location.reload();
@@ -206,9 +191,10 @@
                 {% endif %}
             }
         });
+
         calendar.render();
 
-        // AJAX: Handle Add Form Submission
+        // Add form logic
         $("#add-appt-form").submit(function(e){
             e.preventDefault();
             const data = {
@@ -222,46 +208,38 @@
                 headers: { "X-CSRFToken": "{{ csrf_token }}" },
                 contentType: "application/json",
                 data: JSON.stringify(data),
-                success: function() { location.reload(); },
-                error: function(xhr) { alert(xhr.responseJSON.error); }
+                success: function() { location.reload(); }
             });
         });
     });
 
-    /**
-     * TOGGLE VIEW FUNCTION: Swaps between Calendar and List
-     * @param {string} viewType - 'calendar' or 'list'
-     */
+    // Global Handlers
+    function handleConfirm(id) {
+        $.post(`/owner/appointments/${id}/confirm/`, {
+            "csrfmiddlewaretoken": "{{ csrf_token }}"
+        }, function() { location.reload(); });
+    }
+
+    function handleReject(id) {
+        if(confirm("Reject this appointment?")) {
+            $.post(`/owner/appointments/${id}/reject/`, {
+                "csrfmiddlewaretoken": "{{ csrf_token }}"
+            }, function() { location.reload(); });
+        }
+    }
+
     function switchView(viewType) {
         const calCont = document.getElementById('calendar-container');
         const listCont = document.getElementById('list-container');
-        const btnCal = document.getElementById('btn-calendar');
-        const btnList = document.getElementById('btn-list');
+        document.getElementById('btn-calendar').classList.toggle('active', viewType === 'calendar');
+        document.getElementById('btn-list').classList.toggle('active', viewType === 'list');
 
-        if (viewType === 'calendar') {
-            calCont.style.display = 'block';
-            listCont.style.display = 'none';
-            btnCal.classList.add('active');
-            btnList.classList.remove('active');
-            
-            // IMPORTANT: If calendar was hidden, it needs a resize to look correct
-            if (calendar) {
-                calendar.render();
-                calendar.updateSize();
-            }
-        } else {
-            calCont.style.display = 'none';
-            listCont.style.display = 'block';
-            btnList.classList.add('active');
-            btnCal.classList.remove('active');
+        calCont.style.display = viewType === 'calendar' ? 'block' : 'none';
+        listCont.style.display = viewType === 'list' ? 'block' : 'none';
+        
+        if (viewType === 'calendar' && calendar) {
+            calendar.updateSize();
         }
-    }
-    
-</script>
-<script>
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register("{% static 'serviceworker.js' %}")
-          .then(() => console.log("Pianivo App Ready"));
     }
 </script>
 </body>

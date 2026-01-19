@@ -7,7 +7,7 @@
     <title>Owner Dashboard | Pianivo</title>
     
     <script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
 
     <link rel="manifest" href="{% static 'manifest.json' %}">
     <meta name="theme-color" content="#1e293b">
@@ -15,189 +15,109 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
     <style>
-        @media (max-width: 768px) {
-    .sidebar {
-        transform: translateX(-100%); /* Start hidden on mobile */
-    }
-    .main-content {
-        margin-left: 0;
-        width: 100%;
-        padding: 15px; /* Less padding on small screens */
-    }
-    .sidebar.collapsed {
-        transform: translateX(0); /* Show when toggled on mobile */
-        width: 100%; /* Fill screen on mobile when open */
-    }
-    }
         :root {
-            --primary: #1e293b;   /* Dark Navy */
-            --accent: #3498db;    /* Blue */
-            --success: #27ae60;   /* Green */
-            --danger: #e74c3c;    /* Red */
+            --primary: #1e293b;
+            --accent: #3498db;
+            --success: #27ae60;
+            --danger: #e74c3c;
             --light-bg: #f1f5f9;
             --sidebar-width: 280px;
         }
 
         body { 
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
-            margin: 0; 
-            background-color: var(--light-bg); 
-            display: flex;
-            overflow-x: hidden;
+            margin: 0; background-color: var(--light-bg); 
+            display: flex; overflow-x: hidden;
         }
 
-        /* --- SIDEBAR STYLING --- */
+        /* --- SIDEBAR --- */
         .sidebar { 
-            width: var(--sidebar-width); 
-            background: var(--primary); 
-            color: white; 
-            height: 100vh; 
-            padding: 25px; 
-            position: fixed; 
-            left: 0;
-            top: 0;
-            box-sizing: border-box; 
-            z-index: 1000;
+            width: var(--sidebar-width); background: var(--primary); color: white; 
+            height: 100vh; padding: 25px; position: fixed; left: 0; top: 0;
+            box-sizing: border-box; z-index: 1000;
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             box-shadow: 4px 0 10px rgba(0,0,0,0.1);
         }
+        .sidebar.collapsed { transform: translateX(-100%); }
 
-        .sidebar.collapsed {
-            transform: translateX(-100%);
-        }
-
-        /* --- MAIN CONTENT STYLING --- */
+        /* --- MAIN CONTENT --- */
         .main-content { 
-            margin-left: var(--sidebar-width); 
-            padding: 40px; 
-            width: calc(100% - var(--sidebar-width)); 
-            box-sizing: border-box; 
+            margin-left: var(--sidebar-width); padding: 40px; 
+            width: calc(100% - var(--sidebar-width)); box-sizing: border-box; 
             transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
-
-        .main-content.expanded {
-            margin-left: 0;
-            width: 100%;
-        }
+        .main-content.expanded { margin-left: 0; width: 100%; }
 
         /* --- UI COMPONENTS --- */
-        .card { 
-            background: white; 
-            padding: 20px; 
-            border-radius: 12px; 
-            box-shadow: 0 4px 6px rgba(0,0,0,0.05); 
-            margin-bottom: 25px; 
-        }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 25px; }
+        
+        .confirm-btn { background: var(--success); color: white; border: none; border-radius: 4px; font-size: 10px; cursor: pointer; padding: 4px 8px; pointer-events: auto !important; }
+        .reject-btn { background: var(--danger); color: white; border: none; border-radius: 4px; font-size: 10px; cursor: pointer; padding: 4px 8px; pointer-events: auto !important; }
 
         .toggle-sidebar-btn {
-            position: fixed;
-            left: 20px;
-            bottom: 20px;
-            z-index: 2000;
-            background: var(--primary);
-            color: white;
-            border: none;
-            border-radius: 50%;
-            width: 50px;
-            height: 50px;
-            cursor: pointer;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
-            transition: transform 0.2s;
+            position: fixed; left: 20px; bottom: 20px; z-index: 2000;
+            background: var(--primary); color: white; border: none; border-radius: 50%;
+            width: 50px; height: 50px; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            display: flex; align-items: center; justify-content: center; font-size: 24px;
         }
 
-        .toggle-sidebar-btn:hover { transform: scale(1.1); }
-
-        /* --- CALENDAR CUSTOMIZATION (50px FIXED HEIGHT) --- */
-        #calendar { background: white; border-radius: 8px; padding: 10px; }
-
+        /* --- CALENDAR SIZING --- */
         .fc-timegrid-event {
-            min-height: 50px !important;
-            max-height: 50px !important;
+            min-height: 60px !important; /* Slightly taller than 50px to fit buttons comfortably */
             border: none !important;
             border-radius: 6px !important;
         }
-
-        .fc-event-main {
-            display: flex !important;
-            align-items: center !important;
-            padding: 0 8px !important;
+        .fc-event-main-container {
+            display: flex; flex-direction: column; justify-content: center; height: 100%; padding: 4px;
         }
+        .fc-event-title { font-size: 11px !important; font-weight: 700 !important; overflow: hidden; text-overflow: ellipsis; }
 
-        .fc-event-title {
-            font-size: 12px !important;
-            font-weight: 600 !important;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .fc-event-time { font-size: 10px !important; margin-right: 5px; opacity: 0.8; }
-
-        /* --- LIST VIEW STYLING --- */
-        .list-table { width: 100%; border-collapse: collapse; }
-        .list-table th { text-align: left; padding: 12px; color: #64748b; border-bottom: 2px solid #f1f5f9; }
-        .list-table td { padding: 15px 12px; border-bottom: 1px solid #f1f5f9; }
-
-        /* --- FORMS & SWITCHES --- */
+        /* --- SWITCHES & FORMS --- */
         .switch-container { 
             display: flex; align-items: center; justify-content: space-between; 
-            background: #fffbeb; padding: 20px; border-radius: 12px; 
-            border: 1px solid #fde68a; margin-bottom: 25px; 
+            background: #fffbeb; padding: 20px; border-radius: 12px; border: 1px solid #fde68a; margin-bottom: 25px; 
         }
-
-        .grid-form { 
-            display: grid; 
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); 
-            gap: 15px; 
-        }
-
+        .grid-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; }
         input, select { padding: 12px; border: 1px solid #cbd5e1; border-radius: 8px; }
-
-        .btn-primary { 
-            background: var(--accent); color: white; border: none; 
-            padding: 12px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; 
-        }
+        .btn-primary { background: var(--accent); color: white; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; }
 
         .toggle-group { background: #e2e8f0; padding: 5px; border-radius: 10px; display: inline-flex; }
         .toggle-btn { border: none; padding: 8px 18px; border-radius: 7px; cursor: pointer; font-weight: 600; background: transparent; color: #475569; }
         .toggle-btn.active { background: white; color: var(--primary); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
 
-        /* Toggle Switch Slider */
         .switch { position: relative; display: inline-block; width: 44px; height: 22px; }
         .switch input { opacity: 0; width: 0; height: 0; }
         .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .4s; border-radius: 34px; }
         .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
         input:checked + .slider { background-color: var(--success); }
         input:checked + .slider:before { transform: translateX(22px); }
+
+        @media (max-width: 768px) {
+            .sidebar { transform: translateX(-100%); width: 100%; }
+            .sidebar.collapsed { transform: translateX(0); }
+            .main-content { margin-left: 0; width: 100%; padding: 15px; }
+        }
     </style>
 </head>
 <body>
 
-    <button class="toggle-sidebar-btn" onclick="toggleSidebar()" title="Toggle Admin Panel">☰</button>
+    <button class="toggle-sidebar-btn" onclick="toggleSidebar()">☰</button>
 
     <div class="sidebar" id="sidebar">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
-            <h2 style="margin:0; font-size: 1.4em; letter-spacing: 1px;">Pianivo</h2>
-            <button onclick="toggleSidebar()" style="background:none; border:none; color:white; cursor:pointer; font-size: 1.2em;">◀</button>
+            <h2 style="margin:0;">Pianivo</h2>
+            <button onclick="toggleSidebar()" style="background:none; border:none; color:white; cursor:pointer;">◀</button>
         </div>
         
-        <p style="opacity: 0.7; font-size: 0.9em;">Logged in as: <strong>{{ request.user.username }}</strong></p>
-        <hr style="border: 0.5px solid rgba(255,255,255,0.1); margin: 20px 0;">
-        
-        <h4 style="margin-bottom: 15px;">Filters</h4>
         <form method="get">
-            <label style="font-size: 0.8em; display:block; margin-bottom: 5px;">Status</label>
+            <label style="font-size: 0.8em;">Status Filter</label>
             <select name="status" onchange="this.form.submit()" style="width: 100%; margin-bottom: 15px; background: #334155; color: white; border: none;">
                 <option value="">All Statuses</option>
                 <option value="pending" {% if status_filter == "pending" %}selected{% endif %}>Pending</option>
                 <option value="confirmed" {% if status_filter == "confirmed" %}selected{% endif %}>Confirmed</option>
             </select>
             
-            <label style="font-size: 0.8em; display:block; margin-bottom: 5px;">Employee</label>
+            <label style="font-size: 0.8em;">Employee Filter</label>
             <select name="employee" onchange="this.form.submit()" style="width: 100%; background: #334155; color: white; border: none;">
                 <option value="">All Staff</option>
                 {% for e in employees %}
@@ -206,12 +126,13 @@
             </select>
             <p style="margin-top: 20px;"><a href="." style="color: var(--accent); text-decoration: none; font-size: 0.85em;">↺ Reset Filters</a></p>
         </form>
+        <hr style="border: 0.5px solid rgba(255,255,255,0.1); margin: 30px 0;">
+        <a href="/admin/logout/" style="color: var(--danger); text-decoration: none; font-weight: bold;">Logout</a>
     </div>
 
     <div class="main-content" id="main-content">
-        
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
-            <h1 style="margin:0; color: var(--primary);">Schedule Overview</h1>
+            <h1 style="margin:0; color: var(--primary);">Owner Dashboard</h1>
             <div class="toggle-group">
                 <button id="btn-calendar" class="toggle-btn active" onclick="switchView('calendar')">Calendar</button>
                 <button id="btn-list" class="toggle-btn" onclick="switchView('list')">List View</button>
@@ -220,13 +141,11 @@
 
         <div class="switch-container">
             <div>
-                <strong style="color: #92400e;">Employee Autonomy</strong><br>
-                <small style="color: #b45309;">When active, staff members can manage their own bookings.</small>
+                <strong>Employee Autonomy</strong><br>
+                <small>Staff can manage their own bookings when active.</small>
             </div>
             <label class="switch">
-                <input type="checkbox" id="master-switch" 
-                       {% if user_business.employees_can_manage_appointments %}checked{% endif %}
-                       onchange="togglePermissions(this.checked)">
+                <input type="checkbox" {% if user_business.employees_can_manage_appointments %}checked{% endif %} onchange="togglePermissions(this.checked)">
                 <span class="slider"></span>
             </label>
         </div>
@@ -239,29 +158,21 @@
 
         <div id="list-container" style="display: none;">
             <div class="card">
-                <table class="list-table">
+                <table style="width: 100%; border-collapse: collapse;">
                     <thead>
-                        <tr>
-                            <th>Customer</th>
-                            <th>Date & Time</th>
-                            <th>Employee</th>
+                        <tr style="text-align: left; border-bottom: 2px solid #f1f5f9;">
+                            <th style="padding: 12px;">Customer</th>
+                            <th>Time</th>
                             <th>Status</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for a in appointments %}
-                        <tr>
-                            <td><strong>{{ a.customer_name }}</strong></td>
-                            <td>{{ a.start_time|date:"M d, Y" }} at {{ a.start_time|date:"P" }}</td>
-                            <td>{{ a.employee.user.username }}</td>
-                            <td>
-                                <span style="font-weight: bold; color: {% if a.status == 'confirmed' %}var(--success){% else %}#d97706{% endif %};">
-                                    {{ a.status|capfirst }}
-                                </span>
-                            </td>
+                        <tr style="border-bottom: 1px solid #f1f5f9;">
+                            <td style="padding: 12px;"><strong>{{ a.customer_name }}</strong></td>
+                            <td>{{ a.start_time|date:"M d, P" }}</td>
+                            <td style="color: {% if a.status == 'confirmed' %}var(--success){% else %}#d97706{% endif %}; font-weight: bold;">{{ a.status|capfirst }}</td>
                         </tr>
-                        {% empty %}
-                        <tr><td colspan="4" style="text-align: center; color: #94a3b8;">No appointments match your filters.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -269,7 +180,7 @@
         </div>
 
         <div class="card">
-            <h3 style="margin-top: 0; color: var(--primary);">Quick Book</h3>
+            <h3 style="margin-top: 0;">Quick Book Appointment</h3>
             <form id="owner-add-form" class="grid-form">
                 <input type="text" name="customer_name" placeholder="Customer Name" required>
                 <select name="employee_id" required>
@@ -278,9 +189,9 @@
                         <option value="{{ e.id }}">{{ e.user.username }}</option>
                     {% endfor %}
                 </select>
-                <input type="datetime-local" name="start_time" required title="Start Time">
-                <input type="datetime-local" name="end_time" required title="End Time">
-                <button type="submit" class="btn-primary">Book Now</button>
+                <input type="datetime-local" name="start_time" required>
+                <input type="datetime-local" name="end_time" required>
+                <button type="submit" class="btn-primary">Create Appointment</button>
             </form>
         </div>
     </div>
@@ -289,29 +200,54 @@
 let calendar; 
 
 $(document).ready(function(){
-    // Django CSRF Setup
     $.ajaxSetup({ headers: { "X-CSRFToken": "{{ csrf_token }}" } });
 
-    // Initialize FullCalendar
     const calendarEl = document.getElementById('calendar');
     calendar = new FullCalendar.Calendar(calendarEl, {
-        initialView: 'timeGridDay',
-        headerToolbar: {
-            left: 'prev,next today',
-            center: 'title',
-            right: 'dayGridMonth,timeGridWeek,timeGridDay'
-        },
-        slotMinTime: "08:00:00",
-        slotMaxTime: "22:00:00",
-        allDaySlot: false,
-        height: 'auto',
-        editable: true,
-        // --- Uniform Sizing Logic ---
-        defaultTimedEventDuration: '01:00',
-        forceEventDuration: true,
-        displayEventEnd: false,
-        // ---------------------------
+        initialView: 'timeGridWeek',
+        timeZone: 'America/New_York',
+        headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay' },
+        slotMinTime: "08:00:00", slotMaxTime: "22:00:00",
+        allDaySlot: false, height: 'auto', editable: true,
         events: {{ events_json|safe }},
+
+        // BUTTON INJECTOR
+        eventContent: function(arg) {
+            let container = document.createElement('div');
+            container.classList.add('fc-event-main-container');
+
+            let title = document.createElement('div');
+            title.innerHTML = `<strong>${arg.event.title}</strong>`;
+            container.appendChild(title);
+
+            if (arg.event.extendedProps.status === 'pending') {
+                let btns = document.createElement('div');
+                btns.style.display = 'flex'; btns.style.gap = '4px'; btns.style.marginTop = '4px';
+                btns.innerHTML = `<button class="confirm-btn">Confirm</button><button class="reject-btn">Reject</button>`;
+                container.appendChild(btns);
+            }
+            return { domNodes: [container] };
+        },
+
+        // BUTTON CLICK HANDLER
+        eventClick: function(info) {
+            const target = info.jsEvent.target;
+            if (target.closest('.confirm-btn') || target.closest('.reject-btn')) {
+                info.jsEvent.preventDefault();
+                info.jsEvent.stopPropagation();
+                
+                const id = info.event.id;
+                if (target.closest('.confirm-btn')) { handleConfirm(id); } 
+                else { handleReject(id); }
+                return;
+            }
+
+            // Default delete logic for owner
+            if(confirm("Delete this appointment?")) {
+                $.post(`/owner/appointments/${info.event.id}/delete/`, function() { location.reload(); });
+            }
+        },
+
         eventDrop: function(info) {
             $.ajax({
                 url: `/owner/appointments/${info.event.id}/reschedule/`,
@@ -327,7 +263,6 @@ $(document).ready(function(){
     });
     calendar.render();
 
-    // AJAX Form Submission
     $("#owner-add-form").submit(function(e){
         e.preventDefault();
         const data = {
@@ -346,51 +281,36 @@ $(document).ready(function(){
     });
 });
 
-// SIDEBAR TOGGLE LOGIC
-function toggleSidebar() {
-    const sidebar = document.getElementById('sidebar');
-    const content = document.getElementById('main-content');
-    
-    sidebar.classList.toggle('collapsed');
-    content.classList.toggle('expanded');
+function handleConfirm(id) {
+    $.post(`/owner/appointments/${id}/confirm/`, function() { location.reload(); })
+     .fail(function(xhr) { alert(xhr.responseJSON?.error || "Error"); });
+}
 
-    // Resize calendar after animation
-    if (calendar) {
-        setTimeout(() => { calendar.updateSize(); }, 350);
+function handleReject(id) {
+    if(confirm("Reject this appointment?")) {
+        $.post(`/owner/appointments/${id}/reject/`, function() { location.reload(); });
     }
 }
 
-// VIEW SWITCH LOGIC
-function switchView(viewType) {
-    const calCont = document.getElementById('calendar-container');
-    const listCont = document.getElementById('list-container');
-    const btnCal = document.getElementById('btn-calendar');
-    const btnList = document.getElementById('btn-list');
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const content = document.getElementById('main-content');
+    sidebar.classList.toggle('collapsed');
+    content.classList.toggle('expanded');
+    setTimeout(() => { if (calendar) calendar.updateSize(); }, 350);
+}
 
-    if (viewType === 'calendar') {
-        calCont.style.display = 'block';
-        listCont.style.display = 'none';
-        btnCal.classList.add('active');
-        btnList.classList.remove('active');
-        if (calendar) { calendar.updateSize(); }
-    } else {
-        calCont.style.display = 'none';
-        listCont.style.display = 'block';
-        btnList.classList.add('active');
-        btnCal.classList.remove('active');
-    }
+function switchView(viewType) {
+    document.getElementById('calendar-container').style.display = viewType === 'calendar' ? 'block' : 'none';
+    document.getElementById('list-container').style.display = viewType === 'list' ? 'block' : 'none';
+    document.getElementById('btn-calendar').classList.toggle('active', viewType === 'calendar');
+    document.getElementById('btn-list').classList.toggle('active', viewType === 'list');
+    if (viewType === 'calendar' && calendar) calendar.updateSize();
 }
 
 function togglePermissions(isEnabled) {
     $.post("{% url 'owner:toggle_permissions' %}", { 'enabled': isEnabled });
 }
-
-</script>
-<script>
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register("{% static 'serviceworker.js' %}")
-          .then(() => console.log("Pianivo App Ready"));
-    }
 </script>
 </body>
 </html>
