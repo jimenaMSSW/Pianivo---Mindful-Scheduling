@@ -57,25 +57,29 @@ def whoami(request):
 def owner_dashboard(request):
     business = get_object_or_404(Business, owner=request.user)
     
+    appointments = Appointment.objects.filter(business=business)  # filter first
+
     status_filter = request.GET.get('status')
     employee_filter = request.GET.get('employee')
-    
-    appointments = Appointment.objects.filter(business=business)
     
     if status_filter:
         appointments = appointments.filter(status=status_filter)
     if employee_filter:
         appointments = appointments.filter(employee_id=employee_filter)
+    
+    # ORDER BY DATE ASCENDING
+    appointments = appointments.order_by('start_time')
 
     context = {
         'user_business': business,
-        'appointments': appointments.order_by('-start_time'),
+        'appointments': appointments,
         'employees': Employee.objects.filter(business=business),
         'events_json': get_calendar_events(appointments),
         'status_filter': status_filter,
         'employee_filter': employee_filter,
     }
     return render(request, 'owner/dashboard.html', context)
+
 
 @require_POST
 @login_required
@@ -104,7 +108,7 @@ def add_appointment(request):
             customer_name=data.get("customer_name"),
             start_time=start,
             end_time=end,
-            status="confirmed"
+            status="pending"
         )
         return JsonResponse({"success": True})
     except Exception as e:
@@ -198,7 +202,7 @@ def employee_add_appointment(request):
             customer_name=data.get("customer_name"),
             start_time=start,
             end_time=end,
-            status="confirmed"
+            status="pending"
         )
         return JsonResponse({"success": True})
     except Exception as e:

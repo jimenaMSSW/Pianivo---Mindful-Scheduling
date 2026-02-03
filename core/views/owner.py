@@ -4,26 +4,31 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, get_object_or_404
 from django.utils import timezone
 from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.csrf import csrf_exempt, csrf_protect
 from django.views.decorators.http import require_POST
-from core.models import Appointment, BusinessEmployee, Business
 from django.core.exceptions import PermissionDenied
 
+from core.models import Appointment, BusinessEmployee, Business
+
+
+# --- Helper ---
 def get_aware_datetime(date_str):
+    """Convert ISO string to aware datetime"""
     try:
-        dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+        dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
         return dt if timezone.is_aware(dt) else timezone.make_aware(dt)
     except Exception:
         return timezone.now()
 
-@login_required
-def dashboard(request):
-    # Get Business Profile
-    employee_profile = getattr(request.user, 'employee_profile', None)
-    user_business = employee_profile.business if employee_profile else Business.objects.first()
 
+# --- Dashboard ---
+@login_required
+def owner_dashboard(request):
+    """Owner dashboard: list + calendar"""
+    # Security check
+    user_business = getattr(request.user, 'business_owned', None)
     if not user_business:
-        return render(request, "owner/dashboard.html", {"error": "No business found."})
+        raise PermissionDenied("You do not own a business.")
 
     # Filters
     status_filter = request.GET.get("status", "")
@@ -39,62 +44,118 @@ def dashboard(request):
     # Build Calendar Events
     events = []
     for a in appointments:
-        color = "#ffc107" # Default Pending
-        if a.employee and a.employee.color:
-            color = a.employee.color
-        elif a.status == "confirmed":
+        color = "#ffc107"  # pending
+        if a.status == "confirmed":
             color = "#28a745"
         elif a.status == "rejected":
             color = "#dc3545"
+        elif a.employee and getattr(a.employee, "color", None):
+            color = a.employee.color
 
         events.append({
             "id": str(a.id),
             "title": f"{a.customer_name} ({a.employee.user.username if a.employee else 'Unassigned'})",
             "start": a.start_time.isoformat(),
-            #"end": a.end_time.isoformat(),
+            "end": a.end_time.isoformat() if a.end_time else None,
             "backgroundColor": color,
             "borderColor": color,
-            "textColor": "#000000"
+            "textColor": "#000000",
+            "extendedProps": {
+                "status": a.status
+            }
         })
 
     return render(request, "owner/dashboard.html", {
-        "appointments": appointments.order_by("start_time"), # This is for the List View
-        "events_json": json.dumps(events),                 # This is for the Calendar
-        "user_business": user_business,
         "appointments": appointments.order_by("start_time"),
-        "employees": BusinessEmployee.objects.filter(business=user_business),
         "events_json": json.dumps(events),
+        "user_business": user_business,
+        "employees": BusinessEmployee.objects.filter(business=user_business),
         "status_filter": status_filter,
         "employee_filter": employee_filter
     })
 
+
+# --- Permissions Toggle ---
 @login_required
 @csrf_exempt
 @require_POST
 def toggle_permissions(request):
-    employee_profile = getattr(request.user, 'employee_profile', None)
-    user_business = employee_profile.business if employee_profile else Business.objects.first()
-    
-    is_enabled = request.POST.get('enabled') == 'true'
-    user_business.employees_can_manage_appointments = is_enabled
+    user_business = getattr(request.user, 'business_owned', None)
+    if not user_business:
+        raise PermissionDenied("No business found.")
+    enabled = request.POST.get("enabled") == "true"
+    user_business.employees_can_manage_appointments = enabled
     user_business.save()
     return JsonResponse({"success": True})
 
+
+# --- Appointment Actions ---
 @login_required
+@csrf_exempt
+@require_POST
+def add_appointment(request):
+    """Owner creates a pending appointment"""
+    try:
+        data = json.loads(request.body)
+        user_business = getattr(request.user, 'business_owned', None)
+        if not user_business:
+            raise PermissionDenied("No business found.")
+
+        emp_id = data.get("employee_id")
+        if emp_id in [None, ""]:
+            emp_id = None
+        else:
+            emp_id = int(emp_id)
+
+        Appointment.objects.create(
+            customer_name=data["customer_name"],
+            business=user_business,
+            employee_id=emp_id,
+            start_time=get_aware_datetime(data["start_time"]),
+            end_time=get_aware_datetime(data["end_time"]),
+            status="pending"
+        )
+        return JsonResponse({"success": True})
+    except Exception as e:
+        print("Failed to create appointment:", e)
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@csrf_exempt
 @require_POST
 def confirm_appointment(request, appointment_id):
     appointment = get_object_or_404(Appointment, id=appointment_id)
-    appointment.status = 'confirmed'
+    if appointment.status != "pending":
+        return JsonResponse({"error": "Only pending appointments can be confirmed"}, status=400)
+    if appointment.overlaps():
+        return JsonResponse({"error": "Time slot already taken"}, status=400)
+    appointment.status = "confirmed"
     appointment.save()
-    return JsonResponse({"success": True})
+    return JsonResponse({"success": True, "status": appointment.status})
+
 
 @login_required
+@csrf_exempt
 @require_POST
 def reject_appointment(request, appointment_id):
     appointment = get_object_or_404(Appointment, id=appointment_id)
-    appointment.status = 'rejected'
+    if appointment.status != "pending":
+        return JsonResponse({"error": "Only pending appointments can be rejected"}, status=400)
+    appointment.status = "rejected"
     appointment.save()
+    return JsonResponse({"success": True, "status": appointment.status})
+
+
+@login_required
+@csrf_exempt
+@require_POST
+def delete_appointment(request, appointment_id):
+    """Delete any appointment"""
+    appointment = get_object_or_404(Appointment, id=appointment_id)
+    appointment.delete()
     return JsonResponse({"success": True})
+
 
 @login_required
 @csrf_exempt
@@ -102,10 +163,11 @@ def reject_appointment(request, appointment_id):
 def reschedule_appointment(request, appointment_id):
     appointment = get_object_or_404(Appointment, id=appointment_id)
     data = json.loads(request.body)
-    appointment.start_time = get_aware_datetime(data['start_time'])
-    appointment.end_time = get_aware_datetime(data['end_time'])
+    appointment.start_time = get_aware_datetime(data["start_time"])
+    appointment.end_time = get_aware_datetime(data["end_time"])
     appointment.save()
     return JsonResponse({"success": True})
+
 
 @login_required
 @csrf_exempt
@@ -113,34 +175,8 @@ def reschedule_appointment(request, appointment_id):
 def update_appointment(request, appointment_id):
     appointment = get_object_or_404(Appointment, id=appointment_id)
     data = json.loads(request.body)
-    appointment.customer_name = data.get('customer_name', appointment.customer_name)
-    if data.get('employee_id'):
-        appointment.employee_id = data.get('employee_id')
+    appointment.customer_name = data.get("customer_name", appointment.customer_name)
+    if data.get("employee_id"):
+        appointment.employee_id = data.get("employee_id")
     appointment.save()
     return JsonResponse({"success": True})
-
-@login_required
-@csrf_exempt
-def add_appointment(request):
-    if request.method == "POST":
-        data = json.loads(request.body)
-        employee_profile = getattr(request.user, 'employee_profile', None)
-        user_business = employee_profile.business if employee_profile else Business.objects.first()
-        
-        Appointment.objects.create(
-            customer_name=data['customer_name'],
-            business=user_business,
-            employee_id=data.get('employee_id') if data.get('employee_id') else None,
-            start_time=get_aware_datetime(data['start_time']),
-            end_time=get_aware_datetime(data['end_time']),
-            status='pending'
-        )
-        return JsonResponse({"success": True})
-    
-
-def owner_dashboard(request):
-    # Security Check: If the user doesn't own a business, block them
-    if not hasattr(request.user, 'business_owned'):
-        raise PermissionDenied  # This shows a "403 Forbidden" page
-    
-    # ... rest of your code ...
