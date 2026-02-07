@@ -8,72 +8,89 @@ from django.contrib.auth.decorators import login_required
 from django.utils import timezone
 from django.core.serializers.json import DjangoJSONEncoder
 from django_ratelimit.decorators import ratelimit
+from django.core.exceptions import PermissionDenied
 
-from core.models import Business, Appointment, Employee
+from core.models import Business, Appointment, Employee, Conversation, Message
+
 
 # --- HELPER FUNCTIONS ---
 
 def root_redirect(request):
     if not request.user.is_authenticated:
-        return redirect('login')
+        return redirect('login')  # sends user to login page
 
     if request.user.owned_businesses.exists():
-        return redirect('owner:owner_dashboard') 
+        return redirect('owner:owner_dashboard')  # owner dashboard
 
     if hasattr(request.user, 'employee_profile'):
-        return redirect('employee_dashboard')
+        return redirect('employee_dashboard')  # employee dashboard
 
-    return redirect('book')
+    return redirect('book')  # public booking page
+
 
 def get_calendar_events(appointments):
-    """Formats appointment queryset into JSON for FullCalendar with extendedProps for buttons"""
+    """Formats appointments for FullCalendar."""
     events = []
     for a in appointments:
         events.append({
             "id": str(a.id),
-            "title": f"{a.customer_name}",
+            "title": a.customer_name,
             "start": a.start_time.isoformat(),
-            "end": a.end_time.isoformat(),
+            "end": a.end_time.isoformat() if a.end_time else None,
             "extendedProps": {
                 "status": a.status.lower(),
-                "employee_name": a.employee.user.username if a.employee else 'Unassigned'
+                "employee_name": a.employee.user.username if a.employee else 'Unassigned',
+                "conversation_id": getattr(a, "conversation", None) and getattr(a.conversation, "id", None)
             },
-            "backgroundColor": "#27ae60" if a.status == "confirmed" else "#d97706",
+            "backgroundColor": "#27ae60" if a.status.lower() == "confirmed" else "#d97706",
             "borderColor": "transparent",
             "textColor": "#ffffff",
         })
     return json.dumps(events, cls=DjangoJSONEncoder)
 
+
 def whoami(request):
-    """Simple helper for debugging user and subdomain status"""
     return JsonResponse({
         "user": request.user.username if request.user.is_authenticated else "Anonymous",
         "subdomain": getattr(request, "subdomain", "None"),
     })
+
+
+# --- PERMISSION HELPERS ---
+
+def user_can_access_appointment(user, appointment):
+    """Check if user owns business or is the assigned employee."""
+    if appointment.business.owner == user:
+        return True
+    if appointment.employee and appointment.employee.user == user:
+        return True
+    return False
+
+
+def user_can_access_conversation(user, conversation):
+    return user_can_access_appointment(user, conversation.appointment)
+
 
 # --- OWNER VIEWS ---
 
 @login_required
 def owner_dashboard(request):
     business = get_object_or_404(Business, owner=request.user)
-    
-    appointments = Appointment.objects.filter(business=business)  # filter first
+    appointments = Appointment.objects.filter(business=business).order_by('start_time')
+    employees = Employee.objects.filter(business=business)
 
     status_filter = request.GET.get('status')
     employee_filter = request.GET.get('employee')
-    
+
     if status_filter:
         appointments = appointments.filter(status=status_filter)
     if employee_filter:
         appointments = appointments.filter(employee_id=employee_filter)
-    
-    # ORDER BY DATE ASCENDING
-    appointments = appointments.order_by('start_time')
 
     context = {
         'user_business': business,
         'appointments': appointments,
-        'employees': Employee.objects.filter(business=business),
+        'employees': employees,
         'events_json': get_calendar_events(appointments),
         'status_filter': status_filter,
         'employee_filter': employee_filter,
@@ -83,26 +100,19 @@ def owner_dashboard(request):
 
 @require_POST
 @login_required
-def toggle_permissions(request):
-    business = get_object_or_404(Business, owner=request.user)
-    enabled = request.POST.get('enabled') == 'true'
-    business.employees_can_manage_appointments = enabled
-    business.save()
-    return JsonResponse({'status': 'success'})
-
-@require_POST
-@login_required
 def add_appointment(request):
-    """Owner version of adding an appointment"""
+    """Owner adds an appointment via AJAX."""
     business = get_object_or_404(Business, owner=request.user)
     try:
         data = json.loads(request.body)
-        employee = Employee.objects.filter(id=data.get("employee_id"), business=business).first()
-        
+        employee = Employee.objects.filter(
+            id=data.get("employee_id"), business=business
+        ).first()
+
         start = timezone.make_aware(datetime.fromisoformat(data.get("start_time")))
         end = timezone.make_aware(datetime.fromisoformat(data.get("end_time")))
 
-        Appointment.objects.create(
+        appointment = Appointment.objects.create(
             business=business,
             employee=employee,
             customer_name=data.get("customer_name"),
@@ -110,72 +120,37 @@ def add_appointment(request):
             end_time=end,
             status="pending"
         )
+
+        # AUTO CREATE CONVERSATION
+        Conversation.objects.get_or_create(appointment=appointment)
+
         return JsonResponse({"success": True})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
 
+
 @require_POST
 @login_required
 def owner_delete_appointment(request, appointment_id):
-    """Allows owners to delete any appointment in their business"""
+    """Owner deletes an appointment."""
     business = get_object_or_404(Business, owner=request.user)
     appointment = get_object_or_404(Appointment, id=appointment_id, business=business)
     appointment.delete()
     return JsonResponse({"success": True})
 
-@require_POST
-@login_required
-def reschedule_appointment(request, appointment_id):
-    """Verify ownership and update appointment timing"""
-    business = get_object_or_404(Business, owner=request.user)
-    appointment = get_object_or_404(Appointment, id=appointment_id, business=business)
-    
-    try:
-        data = json.loads(request.body)
-        appointment.start_time = timezone.make_aware(datetime.fromisoformat(data.get("start_time")))
-        appointment.end_time = timezone.make_aware(datetime.fromisoformat(data.get("end_time")))
-        
-        if appointment.overlaps():
-            return JsonResponse({"error": "New time overlaps with another appointment"}, status=400)
-            
-        appointment.save()
-        return JsonResponse({"success": True})
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=400)
-
-@require_POST
-@login_required
-def update_appointment(request, appointment_id):
-    """Updates specific details like name or assigned staff"""
-    business = get_object_or_404(Business, owner=request.user)
-    appointment = get_object_or_404(Appointment, id=appointment_id, business=business)
-    
-    try:
-        data = json.loads(request.body)
-        appointment.customer_name = data.get("customer_name", appointment.customer_name)
-        
-        emp_id = data.get("employee_id")
-        if emp_id:
-            appointment.employee = get_object_or_404(Employee, id=emp_id, business=business)
-            
-        appointment.save()
-        return JsonResponse({"success": True})
-    except Exception as e:
-        return JsonResponse({"error": str(e)}, status=400)
 
 # --- EMPLOYEE VIEWS ---
 
 @login_required
 def employee_dashboard(request):
     employee = getattr(request.user, 'employee_profile', None)
-    
+
     if not employee:
         if request.user.owned_businesses.exists():
             return redirect('owner:owner_dashboard')
         return redirect('login')
 
     appointments = Appointment.objects.filter(employee=employee).order_by('start_time')
-    
     context = {
         'employee': employee,
         'appointments': appointments,
@@ -183,11 +158,12 @@ def employee_dashboard(request):
     }
     return render(request, 'employee/dashboard.html', context)
 
+
 @require_POST
 @login_required
 def employee_add_appointment(request):
     employee = get_object_or_404(Employee, user=request.user)
-    
+
     if not employee.business.employees_can_manage_appointments:
         return JsonResponse({"error": "Manager has disabled self-booking."}, status=403)
 
@@ -195,8 +171,8 @@ def employee_add_appointment(request):
         data = json.loads(request.body)
         start = timezone.make_aware(datetime.fromisoformat(data.get("start_time")))
         end = timezone.make_aware(datetime.fromisoformat(data.get("end_time")))
-        
-        Appointment.objects.create(
+
+        appointment = Appointment.objects.create(
             business=employee.business,
             employee=employee,
             customer_name=data.get("customer_name"),
@@ -204,47 +180,88 @@ def employee_add_appointment(request):
             end_time=end,
             status="pending"
         )
+
+        Conversation.objects.get_or_create(appointment=appointment)
         return JsonResponse({"success": True})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=400)
+
 
 @require_POST
 @login_required
 def employee_delete_appointment(request, appointment_id):
     employee = get_object_or_404(Employee, user=request.user)
-    
-    if not employee.business.employees_can_manage_appointments:
-        return JsonResponse({"error": "Permission denied"}, status=403)
-        
     appointment = get_object_or_404(Appointment, id=appointment_id, employee=employee)
     appointment.delete()
     return JsonResponse({"success": True})
 
+
 # --- APPOINTMENT STATUS ACTIONS ---
 
 @require_POST
-@csrf_protect 
+@login_required
 def confirm_appointment(request, appointment_id):
+    """Confirm an appointment safely."""
     appointment = get_object_or_404(Appointment, id=appointment_id)
 
-    if appointment.status != "pending":
+    if not user_can_access_appointment(request.user, appointment):
+        raise PermissionDenied()
+
+    if appointment.status.lower() != "pending":
         return JsonResponse({"error": "Only pending appointments can be confirmed"}, status=400)
 
     if appointment.overlaps():
-        return JsonResponse({"error": "Time slot already taken by another confirmed appointment"}, status=400)
+        return JsonResponse({"error": "Time slot already taken"}, status=400)
 
     appointment.confirm()
     return JsonResponse({"success": True, "status": appointment.status})
 
+
 @require_POST
-@csrf_protect
+@login_required
 def reject_appointment(request, appointment_id):
     appointment = get_object_or_404(Appointment, id=appointment_id)
-    if appointment.status != "pending":
+
+    if not user_can_access_appointment(request.user, appointment):
+        raise PermissionDenied()
+
+    if appointment.status.lower() != "pending":
         return JsonResponse({"error": "Only pending appointments can be rejected"}, status=400)
 
     appointment.reject()
     return JsonResponse({"success": True, "status": appointment.status})
+
+
+# --- MESSAGES API ---
+
+@login_required
+def api_get_messages(request):
+    conversation_id = request.GET.get("conversation")
+    conversation = get_object_or_404(Conversation, id=conversation_id)
+
+    if not user_can_access_conversation(request.user, conversation):
+        raise PermissionDenied()
+
+    messages = conversation.messages.order_by("timestamp")
+    data = [{"id": m.id, "sender": m.sender.id, "content": m.content, "timestamp": m.timestamp.isoformat()} for m in messages]
+    return JsonResponse(data, safe=False)
+
+
+@csrf_exempt
+@login_required
+def api_send_message(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=400)
+
+    data = json.loads(request.body)
+    conversation = get_object_or_404(Conversation, id=data.get("conversation"))
+
+    if not user_can_access_conversation(request.user, conversation):
+        raise PermissionDenied()
+
+    msg = Message.objects.create(conversation=conversation, sender=request.user, content=data.get("content"))
+    return JsonResponse({"success": True, "id": msg.id})
+
 
 # --- PUBLIC BOOKING ---
 
@@ -263,16 +280,15 @@ def book_appointment(request):
             start_time = timezone.make_aware(datetime.fromisoformat(data.get("start_time")))
             end_time = timezone.make_aware(datetime.fromisoformat(data.get("end_time")))
 
-            # Check for overlap before creating pending
             if Appointment.objects.filter(
-                business=business, 
-                status="confirmed", 
-                start_time__lt=end_time, 
+                business=business,
+                status="confirmed",
+                start_time__lt=end_time,
                 end_time__gt=start_time
             ).exists():
                 return JsonResponse({"error": "Slot taken"}, status=400)
 
-            Appointment.objects.create(
+            appointment = Appointment.objects.create(
                 customer_name=data.get("customer_name"),
                 customer_email=data.get("customer_email"),
                 business=business,
@@ -280,7 +296,10 @@ def book_appointment(request):
                 end_time=end_time,
                 status="pending"
             )
+
+            Conversation.objects.get_or_create(appointment=appointment)
             return JsonResponse({"success": True}, status=201)
+
         except Exception as e:
             return JsonResponse({"error": str(e)}, status=400)
 

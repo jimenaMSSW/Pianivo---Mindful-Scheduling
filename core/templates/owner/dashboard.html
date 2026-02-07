@@ -2,198 +2,296 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Owner Dashboard | Pianivo</title>
-    
-    <script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
-    
-    <link rel="manifest" href="{% static 'manifest.json' %}">
-    <meta name="theme-color" content="#1e293b">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Owner Dashboard | Pianivo</title>
 
-    <style>
-        body { font-family: 'Segoe UI', sans-serif; margin: 0; background: #f4f7f6; padding: 20px; }
-        .container { max-width: 1100px; margin: 0 auto; }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
+<!-- jQuery & FullCalendar -->
+<script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
 
-        .btn { padding: 10px 20px; border-radius: 6px; border: none; cursor: pointer; font-weight: bold; }
-        .btn-add { background: #3498db; color: white; }
-        .confirm-btn { background: #27ae60; color: white; border: none; border-radius: 4px; font-size: 10px; cursor: pointer; padding: 4px 8px; pointer-events: auto !important; }
-        .reject-btn { background: #e74c3c; color: white; border: none; border-radius: 4px; font-size: 10px; cursor: pointer; padding: 4px 8px; pointer-events: auto !important; }
+<link rel="manifest" href="{% static 'manifest.json' %}">
+<meta name="theme-color" content="#1e293b">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
-        .toggle-group { background: #eee; padding: 4px; border-radius: 8px; display: inline-flex; }
-        .toggle-btn { border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 600; }
-        .toggle-btn.active { background: #3498db; color: white; }
+<style>
+body { font-family: 'Segoe UI', sans-serif; margin: 0; background: #f4f7f6; padding: 20px; }
+.container { max-width: 1100px; margin: 0 auto; }
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
+.btn { padding: 10px 20px; border-radius: 6px; border: none; cursor: pointer; font-weight: bold; }
+.btn-add { background: #3498db; color: white; }
+.confirm-btn { background: #27ae60; color: white; border: none; border-radius: 4px; font-size: 10px; cursor: pointer; padding: 4px 8px; pointer-events: auto !important; }
+.reject-btn { background: #e74c3c; color: white; border: none; border-radius: 4px; font-size: 10px; cursor: pointer; padding: 4px 8px; pointer-events: auto !important; }
+#calendar { background: white; padding: 10px; border-radius: 12px; min-height: 600px; }
+.fc-timegrid-event, .fc-event { height: auto !important; min-height: 50px; border-radius: 6px !important; border: none !important; font-size: 12px; padding: 4px; }
+.fc-event-main { display: flex; flex-direction: column; justify-content: space-between; }
+.list-table { width: 100%; border-collapse: collapse; }
+.list-table th { text-align: left; padding: 12px; border-bottom: 2px solid #eee; }
+.list-table td { padding: 12px; border-bottom: 1px solid #eee; }
+.status-badge { padding: 4px 8px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
+.status-confirmed { background: #d4edda; color: #155724; }
+.status-pending { background: #fff3cd; color: #856404; }
+.status-rejected { background: #f8d7da; color: #721c24; }
+select, input { padding: 8px; border-radius: 4px; border: 1px solid #ddd; width: 100%; }
 
-        #calendar { background: white; padding: 10px; border-radius: 12px; min-height: 600px; }
-        .fc-timegrid-event { height: 50px !important; border-radius: 6px !important; border: none !important; font-size: 12px; padding: 2px 4px; }
-        .fc-event-main-container { display: flex; flex-direction: column; justify-content: space-between; height: 100%; padding: 2px 4px; }
-
-        .list-table { width: 100%; border-collapse: collapse; }
-        .list-table th { text-align: left; padding: 12px; border-bottom: 2px solid #eee; }
-        .list-table td { padding: 12px; border-bottom: 1px solid #eee; }
-        .status-badge { padding: 4px 8px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
-        .status-confirmed { background: #d4edda; color: #155724; }
-        .status-pending { background: #fff3cd; color: #856404; }
-        .status-rejected { background: #f8d7da; color: #721c24; }
-
-        select, input { padding: 8px; border-radius: 4px; border: 1px solid #ddd; width: 100%; }
-    </style>
+#chat-button { position: fixed; bottom: 20px; right: 20px; background: #4CAF50; color: white; width: 60px; height: 60px; border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 25px; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.2); z-index: 999; }
+#chat-window { position: fixed; bottom: 90px; right: 20px; width: 320px; height: 420px; background: white; border-radius: 15px; display: flex; flex-direction: column; box-shadow: 0 5px 20px rgba(0,0,0,0.2); z-index: 999; }
+.hidden { display: none; }
+#chat-header { background: #4CAF50; color: white; padding: 12px; font-weight: bold; display: flex; justify-content: space-between; }
+#chat-messages { flex: 1; overflow-y: auto; padding: 10px; }
+.chat-msg { background: #eee; padding: 8px; border-radius: 8px; margin-bottom: 8px; max-width: 80%; }
+.chat-msg.me { background: #4CAF50; color: white; margin-left: auto; }
+#chat-input-area { display: flex; border-top: 1px solid #ddd; }
+#chat-input { flex: 1; border: none; padding: 10px; }
+</style>
 </head>
+
 <body>
+
 <div class="container">
-    <div class="header">
-        <h1>Hello, {{ user_business.owner.username }}</h1>
-        <a href="/admin/logout/" style="text-decoration: none; color: #e74c3c;">Logout</a>
-    </div>
+  <div class="header">
+    <h1>Owner Dashboard</h1>
+    <button class="btn btn-add" id="btn-add-appt">Add Appointment</button>
+  </div>
 
-    <div class="dashboard-controls">
-        <div class="toggle-group">
-            <button id="btn-calendar" class="toggle-btn active" onclick="switchView('calendar')">📅 Calendar</button>
-            <button id="btn-list" class="toggle-btn" onclick="switchView('list')">📝 List</button>
-        </div>
-    </div>
+  <!-- Calendar -->
+  <div id="calendar"></div>
 
-    {% if user_business.employees_can_manage_appointments %}
-    <div class="card">
-        <h3>Book New Appointment</h3>
-        <form id="add-appt-form" style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr auto; gap: 10px;">
-            <input type="text" id="cust_name" placeholder="Customer Name" required>
-            <input type="datetime-local" id="start_time" required>
-            <input type="datetime-local" id="end_time" required>
-            <select id="employee_id">
-                <option value="">Assign Employee</option>
-                {% for emp in employees %}
-                <option value="{{ emp.id }}">{{ emp.user.username }}</option>
-                {% endfor %}
-            </select>
-            <button type="submit" class="btn btn-add">Add</button>
-        </form>
-    </div>
-    {% endif %}
+  <!-- List View -->
+  <div id="list-container" style="display:none;">
+    <table class="list-table">
+      <thead>
+        <tr>
+          <th>Customer</th>
+          <th>Employee</th>
+          <th>Status</th>
+          <th>Start</th>
+          <th>End</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for appt in appointments %}
+        <tr>
+            <td>{{ appt.customer_name }}</td>
+            <td>
+            {% if appt.employee %}
+                {{ appt.employee.user.username }}
+            {% else %}
+                Unassigned
+            {% endif %}
+            </td>
+            <td>{{ appt.status }}</td>
+            <td>{{ appt.start_time }}</td>
+            <td>{{ appt.end_time }}</td>
+        </tr>
+        {% endfor %}
+       </tbody>
 
-    <div id="calendar-container">
-        <div class="card">
-            <div id="calendar"></div>
-        </div>
-    </div>
+    </table>
+  </div>
 
-    <div id="list-container" style="display: none;">
-        <div class="card">
-            <table class="list-table">
-                <thead>
-                    <tr>
-                        <th>Customer</th>
-                        <th>Time</th>
-                        <th>Status</th>
-                        <th>Employee</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for a in appointments %}
-                    <tr>
-                        <td><strong>{{ a.customer_name }}</strong></td>
-                        <td>{{ a.start_time|date:"M d, Y H:i" }} - {{ a.end_time|date:"H:i" }}</td>
-                        <td>
-                            <span class="status-badge 
-                                {% if a.status == 'confirmed' %}status-confirmed
-                                {% elif a.status == 'pending' %}status-pending
-                                {% else %}status-rejected
-                                {% endif %}">
-                                {{ a.status }}
-                            </span>
-                        </td>
-                        <td>
-                            {% if a.employee %}
-                                {{ a.employee.user.username }}
-                            {% else %}
-                                Unassigned
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% empty %}
-                    <tr><td colspan="4">No appointments found.</td></tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+  <!-- Add Appointment Form -->
+  <form id="add-appt-form" class="card" style="margin-top:20px;">
+    <label>Customer Name</label>
+    <input type="text" id="cust_name" required>
+    <label>Start Time</label>
+    <input type="datetime-local" id="start_time" required>
+    <label>End Time</label>
+    <input type="datetime-local" id="end_time" required>
+    <label>Employee</label>
+    <select id="employee_id">
+      <option value="">Unassigned</option>
+      {% for emp in employees %}
+      <option value="{{ emp.id }}">{{ emp.user.username }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-add" style="margin-top:10px;">Add</button>
+  </form>
+
+  <!-- Chat Window -->
+  <div id="chat-window" class="hidden">
+    <div id="chat-header">
+      Chat
+      <span id="chat-close" style="cursor:pointer;">✖</span>
     </div>
+    <div id="chat-messages"></div>
+    <div id="chat-input-area">
+      <input type="text" id="chat-input" placeholder="Type a message...">
+      <button onclick="sendMessage()">Send</button>
+    </div>
+  </div>
+  <div id="chat-button">💬</div>
 </div>
 
 <script>
 let calendar;
-document.addEventListener('DOMContentLoaded', function() {
-    calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
-        initialView: 'timeGridWeek',
-        slotMinTime: "08:00:00",
-        slotMaxTime: "20:00:00",
-        headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay' },
-        allDaySlot: false,
-        events: {{ events_json|safe }},
-        eventContent: function(arg) {
-            let container = document.createElement('div');
-            container.classList.add('fc-event-main-container');
-            container.innerHTML = `<strong>${arg.event.title}</strong>`;
-            if(arg.event.extendedProps.status === 'pending') {
-                let buttons = document.createElement('div');
-                buttons.style.display='flex'; buttons.style.gap='3px';
-                buttons.innerHTML = '<button class="confirm-btn">✔</button><button class="reject-btn">✖</button>';
-                container.appendChild(buttons);
-            }
-            return { domNodes: [container] };
-        },
-        eventClick: function(info) {
-            const target = info.jsEvent.target;
-            info.jsEvent.preventDefault();
-            info.jsEvent.stopPropagation();
-            const id = info.event.id;
-            if(target.closest('.confirm-btn')) handleConfirm(id);
-            else if(target.closest('.reject-btn')) handleReject(id);
-            else if(confirm("Delete this appointment?")) {
-                $.post(`/owner/appointments/${id}/delete/`, {csrfmiddlewaretoken: "{{ csrf_token }}"}, ()=>location.reload());
-            }
-        }
-    });
-    calendar.render();
+let CURRENT_CONVERSATION_ID = null;
+const USER_ID = parseInt("{{ request.user.id }}");
 
-    $("#add-appt-form").submit(function(e){
-        e.preventDefault();
-        const data = {
-            customer_name: $("#cust_name").val(),
-            start_time: $("#start_time").val(),
-            end_time: $("#end_time").val(),
-            employee_id: $("#employee_id").val()
-        };
-        $.ajax({
-            url: "{% url 'employee_add_appointment' %}",
-            type: "POST",
-            headers: { "X-CSRFToken": "{{ csrf_token }}" },
-            contentType: "application/json",
-            data: JSON.stringify(data),
-            success: ()=>location.reload()
-        });
-    });
+// Ensure each event has conversation_id
+const EVENTS = {{ events_json|safe }};
+EVENTS.forEach((e, i)=>{
+  if(!e.extendedProps.conversation_id) e.extendedProps.conversation_id = "{{ appointments.0.conversation.id|default:'' }}";
 });
 
-function handleConfirm(id) {
-    $.post(`/owner/appointments/${id}/confirm/`, {csrfmiddlewaretoken: "{{ csrf_token }}"}, ()=>location.reload());
-}
-function handleReject(id) {
-    if(confirm("Reject this appointment?")) {
-        $.post(`/owner/appointments/${id}/reject/`, {csrfmiddlewaretoken: "{{ csrf_token }}"}, ()=>location.reload());
+document.addEventListener('DOMContentLoaded', function () {
+calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
+  initialView:'timeGridWeek',
+  slotMinTime:"08:00:00",
+  slotMaxTime:"20:00:00",
+  headerToolbar:{left:'prev,next today',center:'title',right:'dayGridMonth,timeGridWeek,timeGridDay'},
+  allDaySlot:false,
+  events: EVENTS,
+
+  eventContent:function(arg){
+    let container=document.createElement('div');
+    container.classList.add('fc-event-main');
+    container.innerHTML=`<strong>${arg.event.title}</strong>`;
+
+    // MESSAGE BUTTON
+    let msgBtn=document.createElement("button");
+    msgBtn.innerText="💬";
+    msgBtn.style.marginTop="4px";
+    msgBtn.onclick=function(e){
+      e.stopPropagation();
+      CURRENT_CONVERSATION_ID = arg.event.extendedProps.conversation_id;
+      if(!CURRENT_CONVERSATION_ID){
+        alert("Conversation not created yet.");
+        return;
+      }
+      document.getElementById("chat-window").classList.remove("hidden");
+      loadMessages();
+    };
+    container.appendChild(msgBtn);
+
+    // CONFIRM / REJECT
+    if(arg.event.extendedProps.status==='pending'){
+      let btnContainer=document.createElement('div');
+      btnContainer.style.display='flex';
+      btnContainer.style.gap='3px';
+
+      let confirmBtn=document.createElement('button');
+      confirmBtn.classList.add('confirm-btn');
+      confirmBtn.innerText='✔';
+      confirmBtn.onclick=function(e){ e.stopPropagation(); handleConfirm(arg.event.id, confirmBtn, rejectBtn); };
+
+      let rejectBtn=document.createElement('button');
+      rejectBtn.classList.add('reject-btn');
+      rejectBtn.innerText='✖';
+      rejectBtn.onclick=function(e){ e.stopPropagation(); handleReject(arg.event.id, confirmBtn, rejectBtn); };
+
+      btnContainer.appendChild(confirmBtn);
+      btnContainer.appendChild(rejectBtn);
+      container.appendChild(btnContainer);
     }
+
+    return {domNodes:[container]};
+  },
+
+  eventClick:function(info){
+    info.jsEvent.preventDefault();
+    info.jsEvent.stopPropagation();
+    const id=info.event.id;
+    if(confirm("Delete this appointment?")){
+      $.post(`/owner/appointments/${id}/delete/`, {csrfmiddlewaretoken:"{{ csrf_token }}"}, ()=>calendar.getEventById(id).remove());
+    }
+  }
+});
+
+calendar.render();
+
+// ADD APPOINTMENT
+$("#add-appt-form").submit(function(e){
+  e.preventDefault();
+  const data={
+    customer_name:$("#cust_name").val(),
+    start_time:$("#start_time").val(),
+    end_time:$("#end_time").val(),
+    employee_id:$("#employee_id").val()
+  };
+  $.ajax({
+    url:"{% url 'owner:add_appointment' %}",
+    type:"POST",
+    headers:{"X-CSRFToken":"{{ csrf_token }}"},
+    contentType:"application/json",
+    data:JSON.stringify(data),
+    success:()=>location.reload()
+  });
+});
+
+// CHAT TOGGLE
+document.getElementById("chat-button").onclick=()=>{ 
+  document.getElementById("chat-window").classList.toggle("hidden"); 
+  if(CURRENT_CONVERSATION_ID) loadMessages(); 
+};
+document.getElementById("chat-close").onclick=()=>document.getElementById("chat-window").classList.add("hidden");
+
+});
+
+// LOAD MESSAGES
+async function loadMessages(){
+  if(!CURRENT_CONVERSATION_ID) return;
+  const res=await fetch(`/api/messages/?conversation=${CURRENT_CONVERSATION_ID}`);
+  const messages=await res.json();
+  const container=document.getElementById("chat-messages");
+  container.innerHTML="";
+  messages.forEach(msg=>{
+    let div=document.createElement("div");
+    div.classList.add("chat-msg");
+    if(msg.sender===USER_ID) div.classList.add("me");
+    div.innerText=msg.content;
+    container.appendChild(div);
+  });
+  container.scrollTop=container.scrollHeight;
 }
-function switchView(viewType) {
-    document.getElementById('calendar-container').style.display = viewType==='calendar'?'block':'none';
-    document.getElementById('list-container').style.display = viewType==='list'?'block':'none';
-    document.getElementById('btn-calendar').classList.toggle('active', viewType==='calendar');
-    document.getElementById('btn-list').classList.toggle('active', viewType==='list');
-    if(viewType==='calendar' && calendar) calendar.updateSize();
+
+// SEND MESSAGE
+async function sendMessage(){
+  if(!CURRENT_CONVERSATION_ID) return;
+  const input=document.getElementById("chat-input");
+  if(!input.value.trim()) return;
+  await fetch("/api/messages/send/",{
+    method:"POST",
+    headers:{"Content-Type":"application/json","X-CSRFToken":"{{ csrf_token }}"},
+    body:JSON.stringify({conversation:CURRENT_CONVERSATION_ID, content:input.value})
+  });
+  input.value="";
+  loadMessages();
+}
+
+// CONFIRM / REJECT
+function handleConfirm(id, confirmBtn, rejectBtn){
+  $.post(`/owner/appointments/${id}/confirm/`, {csrfmiddlewaretoken:"{{ csrf_token }}"}, function(res){
+    if(res.success){
+      const event=calendar.getEventById(id);
+      if(event){
+        event.setExtendedProp('status','confirmed');
+        event.setProp('backgroundColor','#27ae60');
+        confirmBtn.disabled=true;
+        rejectBtn.disabled=true;
+      }
+    } else alert(res.error || "Could not confirm appointment.");
+  });
+}
+
+function handleReject(id, confirmBtn, rejectBtn){
+  if(confirm("Reject this appointment?")){
+    $.post(`/owner/appointments/${id}/reject/`, {csrfmiddlewaretoken:"{{ csrf_token }}"}, function(res){
+      if(res.success){
+        const event=calendar.getEventById(id);
+        if(event){
+          event.setExtendedProp('status','rejected');
+          event.setProp('backgroundColor','#e74c3c');
+          confirmBtn.disabled=true;
+          rejectBtn.disabled=true;
+        }
+      } else alert(res.error || "Could not reject appointment.");
+    });
+  }
 }
 </script>
+
 </body>
 </html>
