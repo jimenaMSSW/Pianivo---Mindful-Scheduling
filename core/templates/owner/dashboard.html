@@ -2,296 +2,285 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Owner Dashboard | Pianivo</title>
+    <meta charset="UTF-8">
+    <title>Pianivo | Owner Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 
-<!-- jQuery & FullCalendar -->
-<script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+    <style>
+        :root { --sidebar-width: 260px; }
+        body { background: #f1f5f9; overflow-x: hidden; font-family: 'Inter', sans-serif; }
+        
+        /* Sidebar Toggle Logic */
+        #sidebar { width: var(--sidebar-width); transition: all 0.3s; position: fixed; height: 100vh; background: #1e293b; z-index: 50; }
+        #sidebar.collapsed { margin-left: calc(var(--sidebar-width) * -1); }
+        #main-content { transition: all 0.3s; margin-left: var(--sidebar-width); padding: 2rem; }
+        #main-content.expanded { margin-left: 0; }
 
-<link rel="manifest" href="{% static 'manifest.json' %}">
-<meta name="theme-color" content="#1e293b">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+        /* Calendar Styling */
+        .fc-timegrid-slot { height: 3.5rem !important; }
+        .fc { background: white; padding: 1.5rem; border-radius: 0.75rem; border: none; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
+        .fc-header-toolbar { margin-bottom: 1.5rem !important; }
+        
+        /* Custom View Toggle */
+        .view-toggle-btn { padding: 0.5rem 1.5rem; border-radius: 9999px; transition: 0.2s; cursor: pointer; }
+        .view-toggle-btn.active { background: #10b981; color: white; box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.4); }
+        
+        /* Logout Button Style */
+        .logout-link { color: #f87171; transition: 0.2s; }
+        .logout-link:hover { color: #ef4444; }
 
-<style>
-body { font-family: 'Segoe UI', sans-serif; margin: 0; background: #f4f7f6; padding: 20px; }
-.container { max-width: 1100px; margin: 0 auto; }
-.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-.card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
-.btn { padding: 10px 20px; border-radius: 6px; border: none; cursor: pointer; font-weight: bold; }
-.btn-add { background: #3498db; color: white; }
-.confirm-btn { background: #27ae60; color: white; border: none; border-radius: 4px; font-size: 10px; cursor: pointer; padding: 4px 8px; pointer-events: auto !important; }
-.reject-btn { background: #e74c3c; color: white; border: none; border-radius: 4px; font-size: 10px; cursor: pointer; padding: 4px 8px; pointer-events: auto !important; }
-#calendar { background: white; padding: 10px; border-radius: 12px; min-height: 600px; }
-.fc-timegrid-event, .fc-event { height: auto !important; min-height: 50px; border-radius: 6px !important; border: none !important; font-size: 12px; padding: 4px; }
-.fc-event-main { display: flex; flex-direction: column; justify-content: space-between; }
-.list-table { width: 100%; border-collapse: collapse; }
-.list-table th { text-align: left; padding: 12px; border-bottom: 2px solid #eee; }
-.list-table td { padding: 12px; border-bottom: 1px solid #eee; }
-.status-badge { padding: 4px 8px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
-.status-confirmed { background: #d4edda; color: #155724; }
-.status-pending { background: #fff3cd; color: #856404; }
-.status-rejected { background: #f8d7da; color: #721c24; }
-select, input { padding: 8px; border-radius: 4px; border: 1px solid #ddd; width: 100%; }
-
-#chat-button { position: fixed; bottom: 20px; right: 20px; background: #4CAF50; color: white; width: 60px; height: 60px; border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 25px; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.2); z-index: 999; }
-#chat-window { position: fixed; bottom: 90px; right: 20px; width: 320px; height: 420px; background: white; border-radius: 15px; display: flex; flex-direction: column; box-shadow: 0 5px 20px rgba(0,0,0,0.2); z-index: 999; }
-.hidden { display: none; }
-#chat-header { background: #4CAF50; color: white; padding: 12px; font-weight: bold; display: flex; justify-content: space-between; }
-#chat-messages { flex: 1; overflow-y: auto; padding: 10px; }
-.chat-msg { background: #eee; padding: 8px; border-radius: 8px; margin-bottom: 8px; max-width: 80%; }
-.chat-msg.me { background: #4CAF50; color: white; margin-left: auto; }
-#chat-input-area { display: flex; border-top: 1px solid #ddd; }
-#chat-input { flex: 1; border: none; padding: 10px; }
-</style>
+        /* Calendar Event Internal Text */
+        .fc-event-main { padding: 2px !important; overflow: hidden; }
+    </style>
 </head>
-
 <body>
 
-<div class="container">
-  <div class="header">
-    <h1>Owner Dashboard</h1>
-    <button class="btn btn-add" id="btn-add-appt">Add Appointment</button>
-  </div>
+    <aside id="sidebar">
+        <div class="p-6 flex justify-between items-center border-b border-slate-700">
+            <span class="text-xl font-bold text-white">Pianivo</span>
+            <button onclick="toggleSidebar()" class="text-slate-400 hover:text-white lg:hidden">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <nav class="mt-4 flex flex-col h-[calc(100vh-100px)]">
+            <div class="flex-grow">
+                <a href="{% url 'owner:owner_dashboard' %}" class="flex items-center px-6 py-3 text-white {% if not selected_employee %}bg-slate-700 border-l-4 border-emerald-500{% else %}text-slate-400 hover:bg-slate-800 hover:text-white{% endif %}">
+                    <i class="fas fa-th-large mr-3"></i> Dashboard
+                </a>
+                
+                <div class="relative">
+                    <button onclick="toggleEmployeeDropdown()" class="w-full flex items-center justify-between px-6 py-3 text-slate-400 hover:bg-slate-800 hover:text-white transition">
+                        <span class="flex items-center">
+                            <i class="fas fa-users mr-3"></i> Employees
+                        </span>
+                        <i id="emp-chevron" class="fas fa-chevron-down text-xs transition-transform {% if selected_employee %}rotate-180{% endif %}"></i>
+                    </button>
+                    <div id="employee-list" class="{% if not selected_employee %}hidden{% endif %} bg-slate-900/50 py-2">
+                        {% for emp in employees %}
+                        <a href="{% url 'owner:employee_schedule' emp.id %}" class="flex items-center pl-12 pr-6 py-2 text-sm {% if selected_employee.id == emp.id %}text-emerald-400 font-bold{% else %}text-slate-400 hover:text-white{% endif %} transition">
+                            <i class="fas fa-user-circle mr-2 opacity-50"></i>
+                            {{ emp.user.username }}
+                        </a>
+                        {% endfor %}
+                        <div class="border-t border-slate-800 mt-2 mx-4 pt-2">
+                            <a href="{% url 'owner:manage_employees' %}" class="block pl-8 py-2 text-[10px] font-bold text-slate-500 hover:text-white uppercase tracking-wider">
+                                <i class="fas fa-cog mr-1"></i> Manage Staff
+                            </a>
+                        </div>
+                    </div>
+                </div>
 
-  <!-- Calendar -->
-  <div id="calendar"></div>
+                <a href="{% url 'owner:business_settings' %}" class="flex items-center px-6 py-3 text-slate-400 hover:bg-slate-800 hover:text-white transition">
+                    <i class="fas fa-cog mr-3"></i> Settings
+                </a>
+            </div>
+            <div class="border-t border-slate-700 p-4">
+                <a href="{% url 'logout' %}" class="flex items-center px-4 py-2 logout-link font-medium">
+                    <i class="fas fa-sign-out-alt mr-3"></i> Logout
+                </a>
+            </div>
+        </nav>
+    </aside>
 
-  <!-- List View -->
-  <div id="list-container" style="display:none;">
-    <table class="list-table">
-      <thead>
-        <tr>
-          <th>Customer</th>
-          <th>Employee</th>
-          <th>Status</th>
-          <th>Start</th>
-          <th>End</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for appt in appointments %}
-        <tr>
-            <td>{{ appt.customer_name }}</td>
-            <td>
-            {% if appt.employee %}
-                {{ appt.employee.user.username }}
-            {% else %}
-                Unassigned
-            {% endif %}
-            </td>
-            <td>{{ appt.status }}</td>
-            <td>{{ appt.start_time }}</td>
-            <td>{{ appt.end_time }}</td>
-        </tr>
-        {% endfor %}
-       </tbody>
+    <main id="main-content">
+        <header class="flex justify-between items-center mb-8">
+            <div class="flex items-center gap-4">
+                <button onclick="toggleSidebar()" class="p-2 bg-white rounded-lg shadow-sm hover:bg-slate-50 border border-slate-200">
+                    <i class="fas fa-bars text-slate-600"></i>
+                </button>
+                <h2 class="text-xl font-bold text-slate-800 hidden md:block">
+                    {% if selected_employee %}Schedule: {{ selected_employee.user.username }}{% else %}Business Overview{% endif %}
+                </h2>
+            </div>
+            
+            <div class="bg-slate-200 p-1 rounded-full flex gap-1">
+                <button id="cal-toggle" onclick="switchView('calendar')" class="view-toggle-btn active text-sm font-medium">Calendar</button>
+                <button id="list-toggle" onclick="switchView('list')" class="view-toggle-btn text-sm font-medium">List View</button>
+            </div>
 
-    </table>
-  </div>
+            <div class="flex items-center gap-6">
+                <div class="hidden sm:flex flex-col items-end">
+                    <span class="text-sm font-bold text-slate-700">{{ user.username }}</span>
+                    <a href="{% url 'logout' %}" class="text-xs logout-link font-semibold uppercase tracking-wider">Sign Out</a>
+                </div>
+                <div class="w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center text-white font-bold shadow-md">
+                    {{ user.username|slice:":1"|upper }}
+                </div>
+            </div>
+        </header>
 
-  <!-- Add Appointment Form -->
-  <form id="add-appt-form" class="card" style="margin-top:20px;">
-    <label>Customer Name</label>
-    <input type="text" id="cust_name" required>
-    <label>Start Time</label>
-    <input type="datetime-local" id="start_time" required>
-    <label>End Time</label>
-    <input type="datetime-local" id="end_time" required>
-    <label>Employee</label>
-    <select id="employee_id">
-      <option value="">Unassigned</option>
-      {% for emp in employees %}
-      <option value="{{ emp.id }}">{{ emp.user.username }}</option>
-      {% endfor %}
-    </select>
-    <button type="submit" class="btn btn-add" style="margin-top:10px;">Add</button>
-  </form>
+        <section id="calendar-section">
+            <div id="calendar"></div>
+        </section>
 
-  <!-- Chat Window -->
-  <div id="chat-window" class="hidden">
-    <div id="chat-header">
-      Chat
-      <span id="chat-close" style="cursor:pointer;">✖</span>
+        <section id="list-section" class="hidden">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <table class="w-full text-left">
+                    <thead class="bg-slate-50 border-b border-slate-200">
+                        <tr>
+                            <th class="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Customer / Instructor</th>
+                            <th class="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Date & Time</th>
+                            <th class="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Status</th>
+                            <th class="px-6 py-4 text-xs font-semibold text-slate-500 uppercase text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        {% for appt in appointments %}
+                        <tr class="hover:bg-slate-50 transition">
+                            <td class="px-6 py-4">
+                                <div class="font-bold text-slate-800">{{ appt.customer_name }}</div>
+                                <div class="text-xs text-emerald-600 font-semibold"><i class="fas fa-user-tie mr-1"></i>{{ appt.employee.user.username }}</div>
+                            </td>
+                            <td class="px-6 py-4 text-slate-600">
+                                <span class="font-medium">{{ appt.start_time|date:"M d, Y" }}</span>
+                                <span class="text-xs text-slate-400 block">{{ appt.start_time|date:"H:i" }}</span>
+                            </td>
+                            <td class="px-6 py-4">
+                                <span class="px-3 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase
+                                    {% if appt.status == 'confirmed' %}bg-emerald-100 text-emerald-700
+                                    {% elif appt.status == 'pending' %}bg-amber-100 text-amber-700
+                                    {% else %}bg-rose-100 text-rose-700{% endif %}">
+                                    {{ appt.status }}
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 text-right">
+                                <button onclick="openChat('{{ appt.conversation.id|default:'' }}', '{{ appt.customer_name }}', '{{ appt.id }}')" 
+                                        class="text-blue-600 hover:bg-blue-50 px-3 py-1 rounded-md transition font-medium text-sm">
+                                    <i class="fas fa-comment mr-1"></i> Chat
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <div id="chat-modal" class="fixed inset-0 bg-slate-900/60 hidden z-[100] flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-200">
+            <div class="p-4 bg-slate-800 text-white flex justify-between items-center">
+                <h3 id="chat-title" class="font-bold flex items-center gap-2"><i class="fas fa-comments text-emerald-400"></i> Chat</h3>
+                <button onclick="closeChat()" class="text-slate-400 hover:text-white text-2xl leading-none">&times;</button>
+            </div>
+            <div id="chat-messages" class="h-96 overflow-y-auto p-4 space-y-4 bg-slate-50"></div>
+            <div class="p-4 border-t border-slate-100 flex gap-2 bg-white">
+                <input type="text" id="chat-input" class="flex-1 border border-slate-200 rounded-xl px-4 py-2 focus:ring-2 focus:ring-emerald-500 outline-none text-sm" placeholder="Type a message...">
+                <button onclick="sendMessage()" class="bg-emerald-600 text-white px-4 py-2 rounded-xl hover:bg-emerald-700 transition">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
     </div>
-    <div id="chat-messages"></div>
-    <div id="chat-input-area">
-      <input type="text" id="chat-input" placeholder="Type a message...">
-      <button onclick="sendMessage()">Send</button>
-    </div>
-  </div>
-  <div id="chat-button">💬</div>
-</div>
 
-<script>
-let calendar;
-let CURRENT_CONVERSATION_ID = null;
-const USER_ID = parseInt("{{ request.user.id }}");
+    <script>
+        let calendar;
+        let activeConvId = null;
 
-// Ensure each event has conversation_id
-const EVENTS = {{ events_json|safe }};
-EVENTS.forEach((e, i)=>{
-  if(!e.extendedProps.conversation_id) e.extendedProps.conversation_id = "{{ appointments.0.conversation.id|default:'' }}";
-});
+        document.addEventListener('DOMContentLoaded', function() {
+            const calendarEl = document.getElementById('calendar');
+            calendar = new FullCalendar.Calendar(calendarEl, {
+                headerToolbar: { 
+                    left: 'prev,next today', 
+                    center: 'title', 
+                    right: 'dayGridMonth,timeGridWeek,timeGridDay' 
+                },
+                initialView: 'timeGridWeek',
+                allDaySlot: false,
+                slotDuration: '00:30:00',
+                expandRows: true,
+                events: {{ events_json|safe }},
+                eventContent: function(arg) {
+                    let instructor = arg.event.extendedProps.employee_name || 'Staff';
+                    return {
+                        html: `<div class="p-1">
+                                <div class="font-bold truncate text-[0.8rem]">${arg.event.title}</div>
+                                <div class="text-[0.7rem] opacity-90 italic truncate">w/ ${instructor}</div>
+                               </div>`
+                    };
+                },
+                eventClick: (info) => openChat(info.event.extendedProps.conversation_id, info.event.title, info.event.id)
+            });
+            calendar.render();
+        });
 
-document.addEventListener('DOMContentLoaded', function () {
-calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
-  initialView:'timeGridWeek',
-  slotMinTime:"08:00:00",
-  slotMaxTime:"20:00:00",
-  headerToolbar:{left:'prev,next today',center:'title',right:'dayGridMonth,timeGridWeek,timeGridDay'},
-  allDaySlot:false,
-  events: EVENTS,
-
-  eventContent:function(arg){
-    let container=document.createElement('div');
-    container.classList.add('fc-event-main');
-    container.innerHTML=`<strong>${arg.event.title}</strong>`;
-
-    // MESSAGE BUTTON
-    let msgBtn=document.createElement("button");
-    msgBtn.innerText="💬";
-    msgBtn.style.marginTop="4px";
-    msgBtn.onclick=function(e){
-      e.stopPropagation();
-      CURRENT_CONVERSATION_ID = arg.event.extendedProps.conversation_id;
-      if(!CURRENT_CONVERSATION_ID){
-        alert("Conversation not created yet.");
-        return;
-      }
-      document.getElementById("chat-window").classList.remove("hidden");
-      loadMessages();
-    };
-    container.appendChild(msgBtn);
-
-    // CONFIRM / REJECT
-    if(arg.event.extendedProps.status==='pending'){
-      let btnContainer=document.createElement('div');
-      btnContainer.style.display='flex';
-      btnContainer.style.gap='3px';
-
-      let confirmBtn=document.createElement('button');
-      confirmBtn.classList.add('confirm-btn');
-      confirmBtn.innerText='✔';
-      confirmBtn.onclick=function(e){ e.stopPropagation(); handleConfirm(arg.event.id, confirmBtn, rejectBtn); };
-
-      let rejectBtn=document.createElement('button');
-      rejectBtn.classList.add('reject-btn');
-      rejectBtn.innerText='✖';
-      rejectBtn.onclick=function(e){ e.stopPropagation(); handleReject(arg.event.id, confirmBtn, rejectBtn); };
-
-      btnContainer.appendChild(confirmBtn);
-      btnContainer.appendChild(rejectBtn);
-      container.appendChild(btnContainer);
-    }
-
-    return {domNodes:[container]};
-  },
-
-  eventClick:function(info){
-    info.jsEvent.preventDefault();
-    info.jsEvent.stopPropagation();
-    const id=info.event.id;
-    if(confirm("Delete this appointment?")){
-      $.post(`/owner/appointments/${id}/delete/`, {csrfmiddlewaretoken:"{{ csrf_token }}"}, ()=>calendar.getEventById(id).remove());
-    }
-  }
-});
-
-calendar.render();
-
-// ADD APPOINTMENT
-$("#add-appt-form").submit(function(e){
-  e.preventDefault();
-  const data={
-    customer_name:$("#cust_name").val(),
-    start_time:$("#start_time").val(),
-    end_time:$("#end_time").val(),
-    employee_id:$("#employee_id").val()
-  };
-  $.ajax({
-    url:"{% url 'owner:add_appointment' %}",
-    type:"POST",
-    headers:{"X-CSRFToken":"{{ csrf_token }}"},
-    contentType:"application/json",
-    data:JSON.stringify(data),
-    success:()=>location.reload()
-  });
-});
-
-// CHAT TOGGLE
-document.getElementById("chat-button").onclick=()=>{ 
-  document.getElementById("chat-window").classList.toggle("hidden"); 
-  if(CURRENT_CONVERSATION_ID) loadMessages(); 
-};
-document.getElementById("chat-close").onclick=()=>document.getElementById("chat-window").classList.add("hidden");
-
-});
-
-// LOAD MESSAGES
-async function loadMessages(){
-  if(!CURRENT_CONVERSATION_ID) return;
-  const res=await fetch(`/api/messages/?conversation=${CURRENT_CONVERSATION_ID}`);
-  const messages=await res.json();
-  const container=document.getElementById("chat-messages");
-  container.innerHTML="";
-  messages.forEach(msg=>{
-    let div=document.createElement("div");
-    div.classList.add("chat-msg");
-    if(msg.sender===USER_ID) div.classList.add("me");
-    div.innerText=msg.content;
-    container.appendChild(div);
-  });
-  container.scrollTop=container.scrollHeight;
-}
-
-// SEND MESSAGE
-async function sendMessage(){
-  if(!CURRENT_CONVERSATION_ID) return;
-  const input=document.getElementById("chat-input");
-  if(!input.value.trim()) return;
-  await fetch("/api/messages/send/",{
-    method:"POST",
-    headers:{"Content-Type":"application/json","X-CSRFToken":"{{ csrf_token }}"},
-    body:JSON.stringify({conversation:CURRENT_CONVERSATION_ID, content:input.value})
-  });
-  input.value="";
-  loadMessages();
-}
-
-// CONFIRM / REJECT
-function handleConfirm(id, confirmBtn, rejectBtn){
-  $.post(`/owner/appointments/${id}/confirm/`, {csrfmiddlewaretoken:"{{ csrf_token }}"}, function(res){
-    if(res.success){
-      const event=calendar.getEventById(id);
-      if(event){
-        event.setExtendedProp('status','confirmed');
-        event.setProp('backgroundColor','#27ae60');
-        confirmBtn.disabled=true;
-        rejectBtn.disabled=true;
-      }
-    } else alert(res.error || "Could not confirm appointment.");
-  });
-}
-
-function handleReject(id, confirmBtn, rejectBtn){
-  if(confirm("Reject this appointment?")){
-    $.post(`/owner/appointments/${id}/reject/`, {csrfmiddlewaretoken:"{{ csrf_token }}"}, function(res){
-      if(res.success){
-        const event=calendar.getEventById(id);
-        if(event){
-          event.setExtendedProp('status','rejected');
-          event.setProp('backgroundColor','#e74c3c');
-          confirmBtn.disabled=true;
-          rejectBtn.disabled=true;
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('collapsed');
+            document.getElementById('main-content').classList.toggle('expanded');
+            setTimeout(() => { calendar.updateSize(); }, 350);
         }
-      } else alert(res.error || "Could not reject appointment.");
-    });
-  }
-}
-</script>
 
+        function toggleEmployeeDropdown() {
+            const list = document.getElementById('employee-list');
+            const chevron = document.getElementById('emp-chevron');
+            list.classList.toggle('hidden');
+            chevron.classList.toggle('rotate-180');
+        }
+
+        function switchView(view) {
+            const calSection = document.getElementById('calendar-section');
+            const listSection = document.getElementById('list-section');
+            const calBtn = document.getElementById('cal-toggle');
+            const listBtn = document.getElementById('list-toggle');
+
+            if (view === 'calendar') {
+                calSection.classList.remove('hidden');
+                listSection.classList.add('hidden');
+                calBtn.classList.add('active');
+                listBtn.classList.remove('active');
+                calendar.updateSize();
+            } else {
+                calSection.classList.add('hidden');
+                listSection.classList.remove('hidden');
+                calBtn.classList.remove('active');
+                listBtn.classList.add('active');
+            }
+        }
+
+        async function openChat(convId, name, apptId) {
+            if (!convId || convId === "None" || convId === "") {
+                const res = await fetch(`/owner/api/appointments/${apptId}/get_or_create_conversation/`, {
+                    method: 'POST', headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+                });
+                const data = await res.json();
+                convId = data.conversation_id;
+            }
+            activeConvId = convId;
+            document.getElementById('chat-title').innerText = "Chat: " + name;
+            document.getElementById('chat-modal').classList.remove('hidden');
+            pollMessages();
+        }
+
+        function closeChat() { document.getElementById('chat-modal').classList.add('hidden'); activeConvId = null; }
+
+        async function pollMessages() {
+            if (!activeConvId) return;
+            const res = await fetch(`/owner/api/messages/?conversation=${activeConvId}`);
+            const data = await res.json();
+            const container = document.getElementById('chat-messages');
+            container.innerHTML = data.map(m => `
+                <div class="flex ${m.sender === '{{ user.username }}' ? 'justify-end' : 'justify-start'}">
+                    <div class="max-w-[85%] p-3 rounded-2xl shadow-sm border ${m.sender === '{{ user.username }}' ? 'bg-emerald-600 text-white border-emerald-500 rounded-tr-none' : 'bg-white text-slate-700 border-slate-100 rounded-tl-none'}">
+                        <p class="text-sm font-medium">${m.content}</p>
+                    </div>
+                </div>
+            `).join('');
+            container.scrollTop = container.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('chat-input');
+            if (!input.value || !activeConvId) return;
+            await fetch(`/owner/api/messages/send/`, {
+                method: 'POST',
+                headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
+                body: JSON.stringify({ conversation: activeConvId, content: input.value })
+            });
+            input.value = '';
+            pollMessages();
+        }
+    </script>
 </body>
 </html>
