@@ -1,0 +1,2 @@
+Pianivo Icon
+/Users/jimenamorales/Documents/Xcode Projects/Pianivo---Mindful-Scheduling-Codex/Pianivo - Mindful Scheduling.swiftpm/File.txt
