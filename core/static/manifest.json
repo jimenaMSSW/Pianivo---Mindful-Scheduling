@@ -1,0 +1,17 @@
+{
+  "name": "Pianivo Business Manager",
+  "short_name": "Pianivo",
+  "start_url": "/owner/",
+  "display": "standalone",
+  "background_color": "#1e293b",
+  "theme_color": "#1e293b",
+  "description": "Manage your piano lesson business schedule.",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3069/3069172.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

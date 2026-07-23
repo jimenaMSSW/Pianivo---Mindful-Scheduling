@@ -1,0 +1,308 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Pianivo | Employee Dashboard</title>
+    
+    <script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+
+    <style>
+        :root { --sidebar-width: 260px; }
+        body { background: #f1f5f9; overflow-x: hidden; font-family: 'Inter', sans-serif; }
+        
+        #sidebar { width: var(--sidebar-width); transition: all 0.3s; position: fixed; height: 100vh; background: #1e293b; z-index: 50; }
+        #sidebar.collapsed { margin-left: calc(var(--sidebar-width) * -1); }
+        #main-content { transition: all 0.3s; margin-left: var(--sidebar-width); padding: 2rem; }
+        #main-content.expanded { margin-left: 0; }
+
+        .fc-timegrid-slot { height: 4.5rem !important; }
+        .fc { background: white; padding: 1.5rem; border-radius: 0.75rem; border: none !important; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
+        
+        .fc-event { border: none !important; border-radius: 8px !important; overflow: hidden; cursor: pointer; transition: transform 0.1s; }
+        .fc-event:hover { transform: scale(1.02); }
+        .event-card { padding: 10px; height: 100%; display: flex; flex-direction: column; justify-content: space-between; color: white; }
+        
+        .view-toggle-btn { padding: 0.5rem 1.5rem; border-radius: 9999px; transition: 0.2s; cursor: pointer; }
+        .view-toggle-btn.active { background: #10b981; color: white; box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.4); }
+
+        .modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.6); display: none; justify-content: center; align-items: center; z-index: 100; backdrop-filter: blur(4px); }
+        
+        #chat-messages::-webkit-scrollbar { width: 4px; }
+        #chat-messages::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+    </style>
+</head>
+<body>
+
+    <aside id="sidebar">
+        <div class="p-6 flex justify-between items-center border-b border-slate-700">
+            <span class="text-xl font-bold text-white">Pianivo</span>
+            <button onclick="toggleSidebar()" class="text-slate-400 hover:text-white lg:hidden">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <nav class="mt-4 flex flex-col h-[calc(100vh-100px)]">
+            <div class="flex-grow">
+                <a href="#" class="flex items-center px-6 py-3 text-white bg-slate-700 border-l-4 border-emerald-500">
+                    <i class="fas fa-calendar-alt mr-3"></i> My Schedule
+                </a>
+                <button onclick="openAddModal()" class="w-full text-left flex items-center px-6 py-3 text-slate-300 hover:text-white hover:bg-slate-800 transition">
+                    <i class="fas fa-plus-circle mr-3 text-emerald-500"></i> New Appointment
+                </button>
+            </div>
+            <div class="border-t border-slate-700 p-4">
+                <a href="/accounts/logout/" class="flex items-center px-4 py-2 text-red-400 hover:text-red-500 font-medium transition">
+                    <i class="fas fa-sign-out-alt mr-3"></i> Logout
+                </a>
+            </div>
+        </nav>
+    </aside>
+
+    <main id="main-content">
+        <header class="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-8 gap-4">
+            <div class="flex items-center gap-4">
+                <button onclick="toggleSidebar()" class="p-2 bg-white rounded-lg shadow-sm hover:bg-slate-50 border border-slate-200">
+                    <i class="fas fa-bars text-slate-600"></i>
+                </button>
+                <h2 class="text-xl font-bold text-slate-800">Employee Dashboard</h2>
+                <button onclick="openAddModal()" class="hidden sm:flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition shadow-md">
+                    <i class="fas fa-plus"></i> Schedule New
+                </button>
+            </div>
+            
+            <div class="flex items-center gap-4 w-full xl:w-auto justify-between sm:justify-end">
+                <div class="bg-slate-200 p-1 rounded-full flex gap-1">
+                    <button id="cal-toggle" onclick="switchView('calendar')" class="view-toggle-btn active text-sm font-medium">Calendar</button>
+                    <button id="list-toggle" onclick="switchView('list')" class="view-toggle-btn text-sm font-medium">List View</button>
+                </div>
+
+                <div class="flex items-center gap-3 pl-4 border-l border-slate-300">
+                    <div class="hidden sm:flex flex-col items-end text-right">
+                        <span class="text-sm font-bold text-slate-700 leading-none">{{ user.username }}</span>
+                        <span class="text-[10px] text-slate-500 uppercase font-semibold">Staff</span>
+                    </div>
+                    <div class="w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center text-white font-bold shadow-md">
+                        {{ user.username|slice:":1"|upper }}
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <section id="calendar-section">
+            <div id="calendar"></div>
+        </section>
+
+        <section id="list-section" class="hidden">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <table class="w-full text-left">
+                    <thead class="bg-slate-50 border-b border-slate-200">
+                        <tr>
+                            <th class="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Customer</th>
+                            <th class="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Time</th>
+                            <th class="px-6 py-4 text-xs font-semibold text-slate-500 uppercase">Status</th>
+                            <th class="px-6 py-4 text-xs font-semibold text-slate-500 uppercase text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        {% for appt in appointments %}
+                        <tr class="hover:bg-slate-50 transition">
+                            <td class="px-6 py-4 font-bold text-slate-800">{{ appt.customer_name }}</td>
+                            <td class="px-6 py-4 text-slate-600 font-medium">{{ appt.start_time|date:"M d, H:i" }}</td>
+                            <td class="px-6 py-4">
+                                <span class="text-[10px] font-bold uppercase px-2 py-1 rounded 
+                                    {% if appt.status == 'confirmed' %}bg-emerald-100 text-emerald-700
+                                    {% elif appt.status == 'pending' %}bg-amber-100 text-amber-700
+                                    {% else %}bg-rose-100 text-rose-700{% endif %}">
+                                    {{ appt.status }}
+                                </span>
+                            </td>
+                            <td class="px-6 py-4 text-right flex justify-end gap-2">
+                                <button onclick="openChat('{{ appt.conversation.id|default:'' }}', '{{ appt.customer_name }}', '{{ appt.id }}')" 
+                                        class="text-blue-600 hover:bg-blue-50 px-3 py-1 rounded-md transition font-medium text-sm" title="Message">
+                                    <i class="fas fa-comment"></i>
+                                </button>
+                                
+                                {% if appt.status == 'pending' %}
+                                    <button onclick="handleConfirm('{{ appt.id }}')" class="bg-emerald-600 text-white px-3 py-1 rounded-md text-xs font-bold hover:bg-emerald-700">Confirm</button>
+                                    <button onclick="openRescheduleModal('{{ appt.id }}', '{{ appt.customer_name }}')" class="bg-slate-500 text-white px-3 py-1 rounded-md text-xs font-bold hover:bg-slate-600">Reschedule</button>
+                                    <button onclick="handleReject('{{ appt.id }}')" class="bg-rose-600 text-white px-3 py-1 rounded-md text-xs font-bold hover:bg-rose-700">Reject</button>
+                                {% elif appt.status == 'confirmed' %}
+                                    <button onclick="openRescheduleModal('{{ appt.id }}', '{{ appt.customer_name }}')" class="bg-slate-500 text-white px-3 py-1 rounded-md text-xs font-bold hover:bg-slate-600">Reschedule</button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <div id="add-modal" class="modal-overlay">
+        <div class="bg-white p-8 rounded-2xl w-full max-w-md shadow-2xl">
+            <h3 class="text-xl font-bold mb-6 flex items-center gap-2"><i class="fas fa-calendar-plus text-emerald-500"></i> New Appointment</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 mb-1 uppercase">Customer Name</label>
+                    <input type="text" id="add-cust-name" class="w-full border border-slate-200 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-emerald-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 mb-1 uppercase">Date & Time</label>
+                    <input type="datetime-local" id="add-time" class="w-full border border-slate-200 rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-emerald-500">
+                </div>
+            </div>
+            <div class="flex gap-3 mt-8">
+                <button id="add-submit-btn" onclick="submitAddAppointment()" class="flex-1 bg-emerald-600 text-white font-bold py-3 rounded-xl hover:bg-emerald-700 transition">Create</button>
+                <button onclick="closeAddModal()" class="flex-1 bg-slate-100 text-slate-600 font-bold py-3 rounded-xl hover:bg-slate-200 transition">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="reschedule-modal" class="modal-overlay">
+        <div class="bg-white p-8 rounded-2xl w-full max-w-sm shadow-2xl">
+            <h3 class="text-xl font-bold mb-2">Reschedule</h3>
+            <p id="resched-cust-name" class="text-sm text-slate-500 mb-6"></p>
+            <input type="datetime-local" id="new-time-input" class="w-full border border-slate-200 rounded-xl px-4 py-3 mb-6 outline-none focus:ring-2 focus:ring-emerald-500">
+            <div class="flex gap-3">
+                <button onclick="submitReschedule()" class="flex-1 bg-emerald-600 text-white font-bold py-3 rounded-xl hover:bg-emerald-700">Update</button>
+                <button onclick="closeModal()" class="flex-1 bg-slate-100 text-slate-600 font-bold py-3 rounded-xl">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="chat-modal" class="modal-overlay">
+        <div class="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-200">
+            <div class="p-4 bg-slate-800 text-white flex justify-between items-center">
+                <h3 id="chat-title" class="font-bold flex items-center gap-2"><i class="fas fa-comment text-emerald-400"></i> Chat</h3>
+                <button onclick="closeChat()" class="text-slate-400 hover:text-white text-2xl">&times;</button>
+            </div>
+            <div id="chat-messages" class="h-80 overflow-y-auto p-4 space-y-4 bg-slate-50"></div>
+            <div class="p-4 border-t flex gap-2">
+                <input type="text" id="chat-input" class="flex-1 border rounded-xl px-4 py-2 outline-none focus:ring-2 focus:ring-emerald-500" placeholder="Type message...">
+                <button onclick="sendMessage()" class="bg-emerald-600 text-white px-4 py-2 rounded-xl hover:bg-emerald-700"><i class="fas fa-paper-plane"></i></button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let calendar;
+        let selectedApptId = null;
+        let activeConvId = null;
+        let chatInterval = null;
+        const EVENTS = {{ events_json|safe }};
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const calendarEl = document.getElementById('calendar');
+            calendar = new FullCalendar.Calendar(calendarEl, {
+                headerToolbar: { left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay' },
+                initialView: 'timeGridWeek',
+                allDaySlot: false,
+                slotDuration: '00:30:00',
+                expandRows: true,
+                events: EVENTS,
+                eventClick: function(info) {
+                    const event = info.event;
+                    if (event.extendedProps.status === 'rejected') return;
+                    const action = confirm(`Manage ${event.title}?\n\nOK for Chat\nCancel for Reschedule`);
+                    if (action) { openChat(event.extendedProps.conversation_id, event.title, event.id); } 
+                    else { openRescheduleModal(event.id, event.title); }
+                },
+                eventContent: function(arg) {
+                    const status = arg.event.extendedProps.status;
+                    let color = (status === 'confirmed') ? '#059669' : (status === 'rejected' ? '#e11d48' : '#475569');
+                    return { html: `<div class="event-card" style="background-color: ${color}"><div class="font-bold text-sm leading-tight">${arg.event.title}</div><div class="text-[9px] uppercase font-black opacity-80 mt-1">${status}</div></div>` };
+                }
+            });
+            calendar.render();
+        });
+
+        // REVISED ADD APPOINTMENT FUNCTION
+        function submitAddAppointment() {
+            const name = document.getElementById('add-cust-name').value;
+            const time = document.getElementById('add-time').value;
+            const btn = document.getElementById('add-submit-btn');
+
+            if(!name || !time) {
+                alert("Please provide both a name and a time.");
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerText = "Processing...";
+
+            // Use URLSearchParams for clean POST body compatibility
+            const data = new URLSearchParams();
+            data.append('customer_name', name);
+            data.append('start_time', time.replace('T', ' ')); // Convert to Django-friendly format
+            data.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+
+            fetch('/employee/appointments/add/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: data
+            })
+            .then(async response => {
+                if (response.ok) {
+                    location.reload();
+                } else {
+                    const errText = await response.text();
+                    throw new Error(errText || "Check server validation");
+                }
+            })
+            .catch(error => {
+                btn.disabled = false;
+                btn.innerText = "Create";
+                alert("Failed to add: " + error.message);
+                console.error("400 Error Details:", error);
+            });
+        }
+
+        function openAddModal() { document.getElementById('add-modal').style.display = 'flex'; }
+        function closeAddModal() { document.getElementById('add-modal').style.display = 'none'; }
+        function toggleSidebar() { document.getElementById('sidebar').classList.toggle('collapsed'); document.getElementById('main-content').classList.toggle('expanded'); setTimeout(() => { calendar.updateSize(); }, 350); }
+        function switchView(view) { document.getElementById('calendar-section').classList.toggle('hidden', view !== 'calendar'); document.getElementById('list-section').classList.toggle('hidden', view !== 'list'); document.getElementById('cal-toggle').classList.toggle('active', view === 'calendar'); document.getElementById('list-toggle').classList.toggle('active', view === 'list'); if(view === 'calendar') calendar.updateSize(); }
+        function handleConfirm(id) { $.post(`/employee/appointments/${id}/confirm/`, { csrfmiddlewaretoken: '{{ csrf_token }}' }, () => location.reload()); }
+        function handleReject(id) { if(confirm("Reject this?")) { $.post(`/employee/appointments/${id}/reject/`, { csrfmiddlewaretoken: '{{ csrf_token }}' }, () => location.reload()); } }
+        function openRescheduleModal(id, name) { selectedApptId = id; document.getElementById('resched-cust-name').innerText = "Customer: " + name; document.getElementById('reschedule-modal').style.display = 'flex'; }
+        function closeModal() { document.getElementById('reschedule-modal').style.display = 'none'; }
+        function submitReschedule() { const newTime = document.getElementById('new-time-input').value.replace('T', ' '); if(!newTime) return; $.post(`/employee/appointments/${selectedApptId}/reschedule/`, { csrfmiddlewaretoken: '{{ csrf_token }}', new_time: newTime }, () => location.reload()); }
+
+        async function openChat(convId, name, apptId) {
+            if (!convId || convId === "None") {
+                const res = await fetch(`/owner/api/appointments/${apptId}/get_or_create_conversation/`, { method: 'POST', headers: { 'X-CSRFToken': '{{ csrf_token }}' } });
+                const data = await res.json();
+                convId = data.conversation_id;
+            }
+            activeConvId = convId;
+            document.getElementById('chat-title').innerText = "Chat: " + name;
+            document.getElementById('chat-modal').style.display = 'flex';
+            pollMessages();
+            if (chatInterval) clearInterval(chatInterval);
+            chatInterval = setInterval(pollMessages, 4000);
+        }
+
+        function closeChat() { document.getElementById('chat-modal').style.display = 'none'; if (chatInterval) clearInterval(chatInterval); }
+        async function pollMessages() {
+            if (!activeConvId) return;
+            const res = await fetch(`/owner/api/messages/?conversation=${activeConvId}`);
+            const data = await res.json();
+            const user = "{{ user.username }}";
+            document.getElementById('chat-messages').innerHTML = data.map(m => `<div class="flex ${m.sender === user ? 'justify-end' : 'justify-start'}"><div class="p-3 rounded-2xl max-w-[85%] ${m.sender === user ? 'bg-emerald-600 text-white' : 'bg-white border text-slate-700 shadow-sm'}"><p class="text-sm font-medium">${m.content}</p></div></div>`).join('');
+            const container = document.getElementById('chat-messages');
+            container.scrollTop = container.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('chat-input');
+            if (!input.value || !activeConvId) return;
+            await fetch(`/owner/api/messages/send/`, { method: 'POST', headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' }, body: JSON.stringify({ conversation: activeConvId, content: input.value }) });
+            input.value = '';
+            pollMessages();
+        }
+    </script>
+</body>
+</html>
