@@ -777,7 +777,10 @@ struct BusinessDetailView: View {
         .navigationTitle(business.studioName)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $bookingService) { svc in
-            ClientBookingSheet(clientName: clientName, business: business, service: svc, employees: employees)
+            HostedBookingView(
+                title: "Book \(svc.name)",
+                url: APIConfig.bookingURL
+            )
         }
         .sheet(isPresented: $isShowingReviewSheet) {
             LeaveReviewSheet(businessCode: business.businessCode, reviewerName: clientName)

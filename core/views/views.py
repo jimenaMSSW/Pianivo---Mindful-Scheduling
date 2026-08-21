@@ -68,7 +68,9 @@ def get_public_business(request, data=None):
     data = data or {}
     business_slug = data.get("business_slug") or getattr(request, "subdomain", None)
     if business_slug:
-        return get_object_or_404(Business, slug=business_slug)
+        business = Business.objects.filter(slug=business_slug).first()
+        if business:
+            return business
     return Business.objects.first()
 
 def require_stripe():
