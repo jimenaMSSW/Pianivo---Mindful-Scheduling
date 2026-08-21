@@ -88,6 +88,68 @@ class Appointment(models.Model):
         self.status = "rejected"
         self.save(update_fields=["status"])
 
+class PaymentAccount(models.Model):
+    business = models.OneToOneField(
+        Business,
+        on_delete=models.CASCADE,
+        related_name="payment_account"
+    )
+    stripe_account_id = models.CharField(max_length=255, blank=True)
+    charges_enabled = models.BooleanField(default=False)
+    payouts_enabled = models.BooleanField(default=False)
+    details_submitted = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Payments for {self.business.name}"
+
+class Payment(models.Model):
+    STATUS_CHOICES = [
+        ("created", "Created"),
+        ("requires_payment_method", "Requires payment method"),
+        ("requires_confirmation", "Requires confirmation"),
+        ("requires_action", "Requires action"),
+        ("processing", "Processing"),
+        ("succeeded", "Succeeded"),
+        ("canceled", "Canceled"),
+        ("failed", "Failed"),
+    ]
+    METHOD_CHOICES = [
+        ("card", "Card"),
+        ("klarna", "Klarna"),
+        ("unknown", "Unknown"),
+    ]
+
+    business = models.ForeignKey(
+        Business,
+        on_delete=models.CASCADE,
+        related_name="payments"
+    )
+    appointment = models.ForeignKey(
+        Appointment,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="payments"
+    )
+    customer_name = models.CharField(max_length=100)
+    customer_email = models.EmailField(blank=True, null=True)
+    amount = models.PositiveIntegerField(help_text="Smallest currency unit, such as cents.")
+    currency = models.CharField(max_length=3, default="usd")
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default="created")
+    payment_method = models.CharField(max_length=30, choices=METHOD_CHOICES, default="unknown")
+    stripe_payment_intent_id = models.CharField(max_length=255, unique=True)
+    stripe_latest_charge_id = models.CharField(max_length=255, blank=True)
+    last_error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.customer_name} {self.amount} {self.currency.upper()} ({self.status})"
+
 # ==========================
 # Messaging Models
 # ==========================

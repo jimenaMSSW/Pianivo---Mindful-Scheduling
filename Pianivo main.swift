@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import FirebaseCore
 
 // MARK: - APP
 
@@ -7,34 +8,98 @@ import SwiftData
 struct PianivoApp: App {
     static var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            User.self, Appointment.self, Service.self, Employee.self,
-            OwnerClientMessage.self, EmployeeClientMessage.self,
-            BusinessProfile.self, Review.self
+            User.self,
+            Appointment.self,
+            Service.self,
+            Employee.self,
+            OwnerClientMessage.self,
+            EmployeeClientMessage.self,
+            BusinessProfile.self,
+            Review.self
         ])
-        
+
         // Tier 1: persistent storage
-        let persistent = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-        if let c = try? ModelContainer(for: schema, configurations: [persistent]) { return c }
-        
-        // Tier 2: wipe corrupt store and retry persistent
-        let url = persistent.url
-        try? FileManager.default.removeItem(at: url)
-        try? FileManager.default.removeItem(at: url.appendingPathExtension("shm"))
-        try? FileManager.default.removeItem(at: url.appendingPathExtension("wal"))
-        if let c = try? ModelContainer(for: schema, configurations: [persistent]) { return c }
-        
-        // Tier 3: in-memory fallback (Swift Playgrounds sandbox)
-        let memory = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
-        return (try? ModelContainer(for: schema, configurations: [memory]))
-        ?? (try! ModelContainer(for: schema))
+        let persistent = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: false
+        )
+
+        if let container = try? ModelContainer(
+            for: schema,
+            configurations: [persistent]
+        ) {
+            return container
+        }
+
+        // Tier 2: remove a corrupted local store and retry
+        let storeURL = persistent.url
+        try? FileManager.default.removeItem(at: storeURL)
+        try? FileManager.default.removeItem(
+            at: storeURL.appendingPathExtension("shm")
+        )
+        try? FileManager.default.removeItem(
+            at: storeURL.appendingPathExtension("wal")
+        )
+
+        if let container = try? ModelContainer(
+            for: schema,
+            configurations: [persistent]
+        ) {
+            return container
+        }
+
+        // Tier 3: in-memory fallback for Swift Playgrounds
+        let memory = ModelConfiguration(
+            schema: schema,
+            isStoredInMemoryOnly: true
+        )
+
+        return (try? ModelContainer(
+            for: schema,
+            configurations: [memory]
+        )) ?? (try! ModelContainer(for: schema))
     }()
-    
+
+    init() {
+        configureFirebase()
+    }
+
     var body: some Scene {
         WindowGroup {
             MainEntryView()
-                .onAppear { DemoDataSeeder.seedIfNeeded(in: Self.sharedModelContainer) }
+                .onAppear {
+                    DemoDataSeeder.seedIfNeeded(
+                        in: Self.sharedModelContainer
+                    )
+                }
         }
         .modelContainer(Self.sharedModelContainer)
+    }
+
+    private func configureFirebase() {
+        // Prevent duplicate initialization during previews or relaunches.
+        guard FirebaseApp.app() == nil else {
+            return
+        }
+
+        guard let plistURL = Bundle.module.url(
+            forResource: "GoogleService-Info",
+            withExtension: "plist"
+        ) else {
+            fatalError(
+                "GoogleService-Info.plist was not found in the Resources folder."
+            )
+        }
+
+        guard let options = FirebaseOptions(
+            contentsOfFile: plistURL.path
+        ) else {
+            fatalError(
+                "GoogleService-Info.plist exists but Firebase could not read it."
+            )
+        }
+
+        FirebaseApp.configure(options: options)
     }
 }
 

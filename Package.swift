@@ -16,6 +16,7 @@ let package = Package(
         .iOSApplication(
             name: "Pianivo - Mindful Scheduling",
             targets: ["AppModule"],
+            teamIdentifier: "D345267D4X",
             displayVersion: "1.0",
             bundleVersion: "1",
             appIcon: .asset("AppIcon"),
@@ -39,10 +40,22 @@ let package = Package(
             appCategory: .productivity
         )
     ],
+    dependencies: [
+        .package(url: "https://github.com/firebase/firebase-ios-sdk", "12.17.0"..<"13.0.0")
+    ],
     targets: [
         .executableTarget(
             name: "AppModule",
+            dependencies: [
+                .product(name: "FirebaseAuth", package: "firebase-ios-sdk"),
+                .product(name: "FirebaseCore", package: "firebase-ios-sdk"),
+                .product(name: "FirebaseFirestore", package: "firebase-ios-sdk"),
+                .product(name: "FirebaseStorage", package: "firebase-ios-sdk")
+            ],
             path: ".",
+            resources: [
+                .process("Resources")
+            ],
             swiftSettings: [
                 .enableUpcomingFeature("BareSlashRegexLiterals")
             ]

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pianivo Booking</title>
+    <script src="https://js.stripe.com/v3/"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-100 text-slate-900">
+    <main class="mx-auto max-w-2xl px-4 py-10">
+        <section class="rounded-lg bg-white p-6 shadow-sm ring-1 ring-slate-200">
+            <div class="mb-6">
+                <h1 class="text-2xl font-bold">Book Appointment</h1>
+                <p class="mt-1 text-sm text-slate-600">
+                    {% if business %}{{ business.name }}{% else %}No business configured{% endif %}
+                </p>
+            </div>
+
+            {% if not stripe_ready %}
+                <div class="mb-5 rounded-md bg-amber-50 p-4 text-sm text-amber-900 ring-1 ring-amber-200">
+                    Stripe is not configured. Set STRIPE_SECRET_KEY and STRIPE_PUBLISHABLE_KEY before accepting payments.
+                </div>
+            {% endif %}
+
+            <form id="booking-form" class="space-y-4">
+                {% csrf_token %}
+                <div>
+                    <label for="customer_name" class="block text-sm font-medium">Name</label>
+                    <input id="customer_name" name="customer_name" autocomplete="name" required
+                           class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200">
+                </div>
+                <div>
+                    <label for="customer_email" class="block text-sm font-medium">Email</label>
+                    <input id="customer_email" name="customer_email" type="email" autocomplete="email" required
+                           class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200">
+                </div>
+                <div class="grid gap-4 sm:grid-cols-2">
+                    <div>
+                        <label for="start_time" class="block text-sm font-medium">Start</label>
+                        <input id="start_time" name="start_time" type="datetime-local" required
+                               class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200">
+                    </div>
+                    <div>
+                        <label for="duration" class="block text-sm font-medium">Duration</label>
+                        <select id="duration" name="duration"
+                                class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200">
+                            <option value="30">30 minutes</option>
+                            <option value="60" selected>60 minutes</option>
+                            <option value="90">90 minutes</option>
+                            <option value="120">120 minutes</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label for="amount" class="block text-sm font-medium">Payment Amount ({{ currency }})</label>
+                    <input id="amount" name="amount" type="number" min="0.50" step="0.01" value="{{ default_amount|floatformat:-2 }}"
+                           class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200">
+                </div>
+
+                <button id="prepare-payment" type="submit"
+                        class="w-full rounded-md bg-emerald-600 px-4 py-3 font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400">
+                    Continue to Payment
+                </button>
+            </form>
+
+            <form id="payment-form" class="mt-6 hidden space-y-4">
+                <div id="payment-element"></div>
+                <button id="submit-payment" type="submit"
+                        class="w-full rounded-md bg-slate-900 px-4 py-3 font-semibold text-white hover:bg-slate-800">
+                    Pay
+                </button>
+                <p id="payment-message" class="hidden text-sm"></p>
+            </form>
+        </section>
+    </main>
+
+    <script>
+        const stripeKey = "{{ stripe_publishable_key|escapejs }}";
+        const bookingForm = document.getElementById("booking-form");
+        const paymentForm = document.getElementById("payment-form");
+        const message = document.getElementById("payment-message");
+        let stripe;
+        let elements;
+
+        function csrfToken() {
+            return document.querySelector("[name=csrfmiddlewaretoken]").value;
+        }
+
+        function endTimeFrom(startValue, minutes) {
+            const start = new Date(startValue);
+            return new Date(start.getTime() + minutes * 60000).toISOString();
+        }
+
+        function showMessage(text, isError = false) {
+            message.textContent = text;
+            message.className = `text-sm ${isError ? "text-rose-700" : "text-emerald-700"}`;
+            message.classList.remove("hidden");
+        }
+
+        bookingForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            if (!stripeKey) {
+                showMessage("Stripe keys are missing on the server.", true);
+                return;
+            }
+
+            const formData = new FormData(bookingForm);
+            const startTime = formData.get("start_time");
+            const amountDollars = Number(formData.get("amount"));
+            const payload = {
+                customer_name: formData.get("customer_name"),
+                customer_email: formData.get("customer_email"),
+                start_time: new Date(startTime).toISOString(),
+                end_time: endTimeFrom(startTime, Number(formData.get("duration"))),
+                amount: Math.round(amountDollars * 100),
+            };
+
+            document.getElementById("prepare-payment").disabled = true;
+            const response = await fetch("{% url 'create_payment_intent' %}", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRFToken": csrfToken(),
+                },
+                body: JSON.stringify(payload),
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                showMessage(data.error || "Could not prepare payment.", true);
+                document.getElementById("prepare-payment").disabled = false;
+                return;
+            }
+
+            stripe = Stripe(data.publishable_key);
+            elements = stripe.elements({ clientSecret: data.client_secret });
+            elements.create("payment").mount("#payment-element");
+            bookingForm.classList.add("hidden");
+            paymentForm.classList.remove("hidden");
+        });
+
+        paymentForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const { error } = await stripe.confirmPayment({
+                elements,
+                confirmParams: {
+                    return_url: `${window.location.origin}{% url 'book' %}`,
+                },
+            });
+            if (error) {
+                showMessage(error.message, true);
+            }
+        });
+    </script>
+</body>
+</html>
