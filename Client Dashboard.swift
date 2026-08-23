@@ -1,5 +1,8 @@
 import SwiftUI
 import SwiftData
+#if canImport(MessageUI)
+import MessageUI
+#endif
 
 // Returns first letter of word 1 + first letter of word 2 (falls back to first 2 chars)
 private func bizInitials(_ name: String) -> String {
@@ -18,9 +21,11 @@ private func bizInitials(_ name: String) -> String {
 struct ClientTabView: View {
     let clientName: String
     var onLogout: (() -> Void)? = nil
+    @Query private var allBusinesses: [BusinessProfile]
     
     @State private var activeView: ClientSection = .home
     @State private var isShowingSidePanel = false
+    @State private var isShowingSupport = false
     
     enum ClientSection { case home, discover, schedule, insights }
     
@@ -67,87 +72,109 @@ struct ClientTabView: View {
                 .zIndex(2)
             }
         }
+        .sheet(isPresented: $isShowingSupport) {
+            SupportReportSheet(
+                accountName: clientName,
+                accountType: "Client",
+                businessSupportEmail: businessSupportEmail
+            )
+        }
+    }
+
+    private var businessSupportEmail: String? {
+        allBusinesses.first { !$0.email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }?.email
     }
     
     // MARK: - Side Panel
     private var clientSidePanel: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            
-            // ── Profile header ────────────────────────────────────────
-            HStack(spacing: 14) {
-                ZStack {
-                    Circle()
-                        .fill(LinearGradient(
-                            colors: [.teal, Color(hex: "#26A69A") ?? .teal],
-                            startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .frame(width: 52, height: 52)
-                    Text(clientName.prefix(1).uppercased())
-                        .font(.title2.bold()).foregroundColor(.white)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(clientName).font(.headline)
-                    Text("Client Account").font(.caption).foregroundColor(.secondary)
-                }
-            }
-            .padding(.top, 60)
-            
-            Divider()
-            
-            // ── Navigation ────────────────────────────────────────────
-            VStack(spacing: 4) {
-                Text("NAVIGATE").font(.caption.bold()).foregroundColor(.secondary).tracking(1.2)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 5)
-                    .padding(.bottom, 4)
-                
-                panelNavItem(label: "Home",      icon: "house.fill",       section: .home)
-                panelNavItem(label: "Discover",  icon: "magnifyingglass",  section: .discover)
-                panelNavItem(label: "Schedule",  icon: "calendar",         section: .schedule)
-                panelNavItem(label: "Insights",  icon: "chart.bar.fill",   section: .insights)
-            }
-            
-            Divider()
-            
-            // ── Account ───────────────────────────────────────────────
-            VStack(spacing: 4) {
-                Text("ACCOUNT").font(.caption.bold()).foregroundColor(.secondary).tracking(1.2)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 5)
-                    .padding(.bottom, 4)
-                
-                // Book new appointment quick-action
-                Button {
-                    withAnimation(.spring()) { activeView = .discover; isShowingSidePanel = false }
-                } label: {
-                    HStack(spacing: 15) {
-                        Image(systemName: "plus.circle.fill").foregroundColor(.teal).frame(width: 24)
-                        Text("Book Appointment").font(.subheadline.bold()).foregroundColor(.primary)
-                        Spacer()
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 20) {
+                // ── Profile header ────────────────────────────────────────
+                HStack(spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(LinearGradient(
+                                colors: [.teal, Color(hex: "#26A69A") ?? .teal],
+                                startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(width: 52, height: 52)
+                        Text(clientName.prefix(1).uppercased())
+                            .font(.title2.bold()).foregroundColor(.white)
                     }
-                    .padding(.vertical, 12).padding(.horizontal, 10)
-                    .background(Color.teal.opacity(0.08))
-                    .cornerRadius(10)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(clientName).font(.headline)
+                        Text("Client Account").font(.caption).foregroundColor(.secondary)
+                    }
                 }
-            }
-            
-            Spacer()
-            
-            // ── Sign Out ──────────────────────────────────────────────
-            Button(role: .destructive) {
-                withAnimation(.spring()) { isShowingSidePanel = false }
-                onLogout?()
-            } label: {
-                HStack {
-                    Image(systemName: "rectangle.portrait.and.arrow.right")
-                    Text("Sign Out")
+                .padding(.top, 60)
+
+                Divider()
+
+                // ── Navigation ────────────────────────────────────────────
+                VStack(spacing: 4) {
+                    Text("NAVIGATE").font(.caption.bold()).foregroundColor(.secondary).tracking(1.2)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 5)
+                        .padding(.bottom, 4)
+
+                    panelNavItem(label: "Home",      icon: "house.fill",       section: .home)
+                    panelNavItem(label: "Discover",  icon: "magnifyingglass",  section: .discover)
+                    panelNavItem(label: "Schedule",  icon: "calendar",         section: .schedule)
+                    panelNavItem(label: "Insights",  icon: "chart.bar.fill",   section: .insights)
                 }
-                .font(.subheadline.bold())
-                .padding()
-                .frame(maxWidth: .infinity)
-                .background(Color.red.opacity(0.1))
-                .cornerRadius(12)
+
+                Divider()
+
+                // ── Account ───────────────────────────────────────────────
+                VStack(spacing: 4) {
+                    Text("ACCOUNT").font(.caption.bold()).foregroundColor(.secondary).tracking(1.2)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 5)
+                        .padding(.bottom, 4)
+
+                    Button {
+                        withAnimation(.spring()) { activeView = .discover; isShowingSidePanel = false }
+                    } label: {
+                        HStack(spacing: 15) {
+                            Image(systemName: "plus.circle.fill").foregroundColor(.teal).frame(width: 24)
+                            Text("Book Appointment").font(.subheadline.bold()).foregroundColor(.primary)
+                            Spacer()
+                        }
+                        .padding(.vertical, 12).padding(.horizontal, 10)
+                        .background(Color.teal.opacity(0.08))
+                        .cornerRadius(10)
+                    }
+
+                    Button {
+                        withAnimation(.spring()) { isShowingSidePanel = false }
+                        isShowingSupport = true
+                    } label: {
+                        HStack(spacing: 15) {
+                            Image(systemName: "questionmark.bubble.fill").foregroundColor(.teal).frame(width: 24)
+                            Text("Support & Errors").font(.subheadline.bold()).foregroundColor(.primary)
+                            Spacer()
+                        }
+                        .padding(.vertical, 12).padding(.horizontal, 10)
+                        .background(Color.teal.opacity(0.08))
+                        .cornerRadius(10)
+                    }
+                }
+
+                Button(role: .destructive) {
+                    withAnimation(.spring()) { isShowingSidePanel = false }
+                    onLogout?()
+                } label: {
+                    HStack {
+                        Image(systemName: "rectangle.portrait.and.arrow.right")
+                        Text("Sign Out")
+                    }
+                    .font(.subheadline.bold())
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                    .background(Color.red.opacity(0.1))
+                    .cornerRadius(12)
+                }
+                .padding(.bottom, 30)
             }
-            .padding(.bottom, 30)
+            .padding()
         }
-        .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(.systemBackground))
         .ignoresSafeArea(edges: .vertical)

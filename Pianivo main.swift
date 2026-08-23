@@ -67,11 +67,6 @@ struct PianivoApp: App {
     var body: some Scene {
         WindowGroup {
             MainEntryView()
-                .onAppear {
-                    DemoDataSeeder.seedIfNeeded(
-                        in: Self.sharedModelContainer
-                    )
-                }
         }
         .modelContainer(Self.sharedModelContainer)
     }
@@ -381,59 +376,49 @@ struct MainEntryView: View {
             LinearGradient(colors: [Color.teal.opacity(0.15), Color(.systemBackground)], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
             
-            VStack(spacing: 32) {
-                Spacer()
-                
-                VStack(spacing: 8) {
-                    Image(systemName: "sparkles.rectangle.stack.fill")
-                        .font(.system(size: 60))
-                        .foregroundColor(.teal)
-                    Text("Pianivo")
-                        .font(.system(size: 42, weight: .bold, design: .rounded))
-                    Text("Mindful scheduling for businesses")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                
-                VStack(spacing: 14) {
-                    Button {
-                        activeSheet = .signIn
-                    } label: {
-                        Text("Sign In")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(Color.teal)
-                            .foregroundColor(.white)
-                            .cornerRadius(16)
-                    }
-                    
-                    Button {
-                        activeSheet = .createAccount
-                    } label: {
-                        Text("Create Account")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(Color.teal.opacity(0.1))
+            ScrollView {
+                VStack(spacing: 32) {
+                    VStack(spacing: 8) {
+                        Image(systemName: "sparkles.rectangle.stack.fill")
+                            .font(.system(size: 60))
                             .foregroundColor(.teal)
-                            .cornerRadius(16)
+                        Text("Pianivo")
+                            .font(.system(size: 42, weight: .bold, design: .rounded))
+                        Text("Mindful scheduling for businesses")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
                     }
-                }
-                .padding(.horizontal)
-                
-                // Demo Quick Access
-                VStack(spacing: 10) {
-                    Text("Quick Demo Access").font(.caption).foregroundColor(.secondary)
-                    HStack(spacing: 12) {
-                        QuickRoleButton(title: "Owner", icon: "crown.fill", role: "owner", name: "Studio Owner", selection: $selectedRole, userName: $userName)
-                        QuickRoleButton(title: "Staff", icon: "person.fill", role: "staff", name: "Demo Staff", selection: $selectedRole, userName: $userName)
-                        QuickRoleButton(title: "Client", icon: "heart.fill", role: "client", name: "Demo Client", selection: $selectedRole, userName: $userName)
+
+                    VStack(spacing: 14) {
+                        Button {
+                            activeSheet = .signIn
+                        } label: {
+                            Text("Sign In")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                                .background(Color.teal)
+                                .foregroundColor(.white)
+                                .cornerRadius(16)
+                        }
+
+                        Button {
+                            activeSheet = .createAccount
+                        } label: {
+                            Text("Create Account")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                                .background(Color.teal.opacity(0.1))
+                                .foregroundColor(.teal)
+                                .cornerRadius(16)
+                        }
                     }
                     .padding(.horizontal)
                 }
-                
-                Spacer()
+                .frame(maxWidth: 520)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 80)
             }
         }
         .sheet(item: $activeSheet) { sheet in
@@ -463,35 +448,38 @@ struct SignInView: View {
     
     var body: some View {
         NavigationStack {
-            VStack(spacing: 24) {
-                Text("Welcome Back")
-                    .font(.largeTitle.bold())
-                    .padding(.top, 20)
-                
-                VStack(spacing: 14) {
-                    AuthField(icon: "envelope", placeholder: "Email", text: $email, isSecure: false)
-                    AuthField(icon: "lock", placeholder: "Password", text: $password, isSecure: true)
+            ScrollView {
+                VStack(spacing: 24) {
+                    Text("Welcome Back")
+                        .font(.largeTitle.bold())
+                        .padding(.top, 20)
+
+                    VStack(spacing: 14) {
+                        AuthField(icon: "envelope", placeholder: "Email", text: $email, isSecure: false)
+                        AuthField(icon: "lock", placeholder: "Password", text: $password, isSecure: true)
+                    }
+                    .padding(.horizontal)
+
+                    if let error = errorMessage {
+                        Text(error).foregroundColor(.red).font(.caption)
+                    }
+
+                    Button {
+                        signIn()
+                    } label: {
+                        Text("Sign In")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(Color.teal)
+                            .foregroundColor(.white)
+                            .cornerRadius(16)
+                    }
+                    .padding(.horizontal)
                 }
-                .padding(.horizontal)
-                
-                if let error = errorMessage {
-                    Text(error).foregroundColor(.red).font(.caption)
-                }
-                
-                Button {
-                    signIn()
-                } label: {
-                    Text("Sign In")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
-                        .background(Color.teal)
-                        .foregroundColor(.white)
-                        .cornerRadius(16)
-                }
-                .padding(.horizontal)
-                
-                Spacer()
+                .frame(maxWidth: 520)
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 32)
             }
             .navigationTitle("Sign In")
             .navigationBarTitleDisplayMode(.inline)
@@ -680,30 +668,6 @@ struct PianivoRootView: View {
     }
 }
 
-struct QuickRoleButton: View {
-    let title: String
-    let icon: String
-    let role: String
-    let name: String
-    @Binding var selection: String?
-    @Binding var userName: String
-    
-    var body: some View {
-        Button {
-            userName = name
-            selection = role
-        } label: {
-            VStack(spacing: 8) {
-                Image(systemName: icon).font(.title2)
-                Text(title).font(.caption.bold())
-            }
-            .frame(maxWidth: .infinity).padding(.vertical, 18)
-            .background(Color.teal.opacity(0.1)).cornerRadius(14)
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 // MARK: - UTILITIES
 
 extension Color {
@@ -790,6 +754,7 @@ struct AccountTypeCard: View {
 }
 
 
+#if DEBUG
 // MARK: - DEMO DATA SEEDER
 
 struct DemoDataSeeder {
@@ -1065,3 +1030,4 @@ struct DemoDataSeeder {
         }
     }
 }
+#endif

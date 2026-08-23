@@ -29,6 +29,7 @@ struct OwnerDashboard: View {
     @State private var isShowingServiceManager = false
     @State private var isShowingEmployeeManager = false
     @State private var isShowingBusinessProfile = false
+    @State private var isShowingSupport = false
     
     // Revenue Toggle State
     @State private var revenuePeriod: RevenuePeriod = .day
@@ -61,6 +62,13 @@ struct OwnerDashboard: View {
 
     private var businessAppointments: [Appointment] {
         ownerBusinessCode.isEmpty ? allAppointments : allAppointments.filter { $0.businessCode == ownerBusinessCode }
+    }
+
+    private var businessSupportEmail: String? {
+        if let email = profiles.first?.email.trimmingCharacters(in: .whitespacesAndNewlines), !email.isEmpty {
+            return email
+        }
+        return nil
     }
 
     private var revenueAppointments: [Appointment] {
@@ -136,6 +144,13 @@ struct OwnerDashboard: View {
                 .sheet(isPresented: $isShowingServiceManager) { ServiceManagerSheet(businessCode: ownerBusinessCode) }
                 .sheet(isPresented: $isShowingEmployeeManager) { EmployeeManagerSheet(businessCode: ownerBusinessCode) }
                 .sheet(isPresented: $isShowingBusinessProfile) { BusinessProfileSheet() }
+                .sheet(isPresented: $isShowingSupport) {
+                    SupportReportSheet(
+                        accountName: loggedInUsers.first?.name ?? "Owner",
+                        accountType: "Owner",
+                        businessSupportEmail: businessSupportEmail
+                    )
+                }
                 .sheet(item: $revenueReportFile) { file in
                     RevenueReportShareSheet(url: file.url)
                 }
@@ -678,82 +693,90 @@ struct OwnerDashboard: View {
                 .ignoresSafeArea()
                 .onTapGesture { withAnimation(.spring()) { isShowingSidePanel = false } }
             
-            VStack(alignment: .leading, spacing: 20) {
-                HStack {
-                    Image(systemName: "crown.fill").foregroundColor(.teal)
-                    Text("Pianivo Owner").font(.headline)
-                }
-                .padding(.top, 60)
-                
-                SideMenuButton(title: "Dashboard", icon: "square.grid.2x2.fill", isSelected: activeTab == .dashboard) {
-                    withAnimation {
-                        activeTab = .dashboard
-                        isShowingSidePanel = false
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 20) {
+                    HStack {
+                        Image(systemName: "crown.fill").foregroundColor(.teal)
+                        Text("Pianivo Owner").font(.headline)
                     }
-                }
+                    .padding(.top, 60)
 
-                SideMenuButton(title: "Revenue Reports", icon: "chart.line.uptrend.xyaxis", isSelected: activeTab == .revenue) {
-                    withAnimation {
-                        activeTab = .revenue
-                        isShowingSidePanel = false
-                    }
-                }
-                
-                Divider()
-                
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("MANAGE BUSINESS").font(.caption.bold()).foregroundColor(.secondary)
-                    Button {
-                        isShowingBusinessProfile = true
-                        withAnimation { isShowingSidePanel = false }
-                    } label: {
-                        Label("Business Profile", systemImage: "building.2.fill")
-                            .font(.subheadline).foregroundColor(.primary)
-                    }
-                    Button { isShowingServiceManager = true } label: { Label("Services & Prices", systemImage: "tag.fill").font(.subheadline).foregroundColor(.primary) }
-                    Button { isShowingEmployeeManager = true } label: { Label("Staff Members", systemImage: "person.2.fill").font(.subheadline).foregroundColor(.primary) }
-                }.padding(.horizontal, 5)
-                
-                Divider()
-                
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("REVENUE HUB").font(.caption.bold()).foregroundColor(.secondary)
-                    HStack(spacing: 8) {
-                        ForEach([("D", RevenuePeriod.day), ("W", .week), ("M", .month), ("Y", .year)], id: \.1) { label, period in
-                            Button(label) { revenuePeriod = period }
-                                .font(.system(size: 10, weight: .bold)).frame(width: 32, height: 32)
-                                .background(revenuePeriod == period ? Color.teal : Color.teal.opacity(0.1))
-                                .foregroundColor(revenuePeriod == period ? .white : .teal)
-                                .clipShape(Circle())
+                    SideMenuButton(title: "Dashboard", icon: "square.grid.2x2.fill", isSelected: activeTab == .dashboard) {
+                        withAnimation {
+                            activeTab = .dashboard
+                            isShowingSidePanel = false
                         }
                     }
-                    Text("$\(calculatedRevenue, specifier: "%.2f")").font(.title2.bold())
-                }.padding(.horizontal, 5)
 
-                Divider().padding(.vertical, 4)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("PREFERENCES").font(.caption.bold()).foregroundColor(.secondary)
-                    SoundToggleRow()
-                        .padding(.horizontal, 2)
-                }.padding(.horizontal, 5)
-
-                Spacer()
-
-                Button(role: .destructive) {
-                    withAnimation { isShowingSidePanel = false }
-                    onLogout?()
-                } label: {
-                    HStack {
-                        Image(systemName: "rectangle.portrait.and.arrow.right")
-                        Text("Sign Out")
+                    SideMenuButton(title: "Revenue Reports", icon: "chart.line.uptrend.xyaxis", isSelected: activeTab == .revenue) {
+                        withAnimation {
+                            activeTab = .revenue
+                            isShowingSidePanel = false
+                        }
                     }
-                    .font(.subheadline.bold()).padding().frame(maxWidth: .infinity)
-                    .background(Color.red.opacity(0.1)).cornerRadius(12)
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("MANAGE BUSINESS").font(.caption.bold()).foregroundColor(.secondary)
+                        Button {
+                            isShowingBusinessProfile = true
+                            withAnimation { isShowingSidePanel = false }
+                        } label: {
+                            Label("Business Profile", systemImage: "building.2.fill")
+                                .font(.subheadline).foregroundColor(.primary)
+                        }
+                        Button { isShowingServiceManager = true } label: { Label("Services & Prices", systemImage: "tag.fill").font(.subheadline).foregroundColor(.primary) }
+                        Button { isShowingEmployeeManager = true } label: { Label("Staff Members", systemImage: "person.2.fill").font(.subheadline).foregroundColor(.primary) }
+                    }.padding(.horizontal, 5)
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("REVENUE HUB").font(.caption.bold()).foregroundColor(.secondary)
+                        HStack(spacing: 8) {
+                            ForEach([("D", RevenuePeriod.day), ("W", .week), ("M", .month), ("Y", .year)], id: \.1) { label, period in
+                                Button(label) { revenuePeriod = period }
+                                    .font(.system(size: 10, weight: .bold)).frame(width: 32, height: 32)
+                                    .background(revenuePeriod == period ? Color.teal : Color.teal.opacity(0.1))
+                                    .foregroundColor(revenuePeriod == period ? .white : .teal)
+                                    .clipShape(Circle())
+                            }
+                        }
+                        Text("$\(calculatedRevenue, specifier: "%.2f")").font(.title2.bold())
+                    }.padding(.horizontal, 5)
+
+                    Divider().padding(.vertical, 4)
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("PREFERENCES").font(.caption.bold()).foregroundColor(.secondary)
+                        Button {
+                            isShowingSupport = true
+                            withAnimation { isShowingSidePanel = false }
+                        } label: {
+                            Label("Support & Errors", systemImage: "questionmark.bubble.fill")
+                                .font(.subheadline)
+                                .foregroundColor(.primary)
+                        }
+                        SoundToggleRow()
+                            .padding(.horizontal, 2)
+                    }.padding(.horizontal, 5)
+
+                    Button(role: .destructive) {
+                        withAnimation { isShowingSidePanel = false }
+                        onLogout?()
+                    } label: {
+                        HStack {
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
+                            Text("Sign Out")
+                        }
+                        .font(.subheadline.bold()).padding().frame(maxWidth: .infinity)
+                        .background(Color.red.opacity(0.1)).cornerRadius(12)
+                    }
+                    .padding(.horizontal).padding(.bottom, 30)
                 }
-                .padding(.horizontal).padding(.bottom, 30)
+                .padding()
             }
-            .padding()
             .frame(width: 270)
             .background(Color(uiColor: .systemBackground))
             .transition(.move(edge: .leading))

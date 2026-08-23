@@ -1,4 +1,214 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
+#if canImport(MessageUI)
+import MessageUI
+#endif
+
+struct SupportReportSheet: View {
+    let accountName: String
+    let accountType: String
+    let businessSupportEmail: String?
+    let appSupportEmail = "pianivomindfulscheduling@gmail.com"
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+    @State private var topic = "App error"
+    @State private var message = ""
+    @State private var includeDiagnosticDetails = true
+    @State private var showMailComposer = false
+    @State private var showMailUnavailable = false
+
+    private let topics = [
+        "Business support",
+        "Booking problem",
+        "Payment issue",
+        "Login problem",
+        "App error",
+        "Other"
+    ]
+
+    private var trimmedMessage: String {
+        message.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canSend: Bool {
+        !trimmedMessage.isEmpty && currentRecipientEmail.contains("@")
+    }
+
+    private var isBusinessRelatedTopic: Bool {
+        topic == "Business support" || topic == "Booking problem"
+    }
+
+    private var currentRecipientEmail: String {
+        if isBusinessRelatedTopic,
+           let email = businessSupportEmail?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !email.isEmpty {
+            return email
+        }
+        return appSupportEmail
+    }
+
+    private var destinationLabel: String {
+        isBusinessRelatedTopic && currentRecipientEmail != appSupportEmail ? "the business" : "Pianivo support"
+    }
+
+    private var supportSubject: String {
+        "Pianivo Support: \(topic)"
+    }
+
+    private var mailtoURL: URL? {
+        var components = URLComponents()
+        components.scheme = "mailto"
+        components.path = currentRecipientEmail
+        components.queryItems = [
+            URLQueryItem(name: "subject", value: supportSubject),
+            URLQueryItem(name: "body", value: supportBody)
+        ]
+        return components.url
+    }
+
+    private var supportBody: String {
+        var body = """
+        Account: \(accountName)
+        Account type: \(accountType)
+        Topic: \(topic)
+
+        Issue:
+        \(trimmedMessage)
+        """
+
+        if includeDiagnosticDetails {
+            body += """
+
+
+            Diagnostic details:
+            App version: \(appVersion)
+            Device: \(deviceName)
+            System: \(systemVersion)
+            Sent: \(Date().formatted(date: .abbreviated, time: .shortened))
+            """
+        }
+
+        return body
+    }
+
+    private var appVersion: String {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "Unknown"
+        return "\(version) (\(build))"
+    }
+
+    private var deviceName: String {
+#if canImport(UIKit)
+        UIDevice.current.model
+#else
+        "Unknown"
+#endif
+    }
+
+    private var systemVersion: String {
+#if canImport(UIKit)
+        "\(UIDevice.current.systemName) \(UIDevice.current.systemVersion)"
+#else
+        ProcessInfo.processInfo.operatingSystemVersionString
+#endif
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Picker("Issue type", selection: $topic) {
+                        ForEach(topics, id: \.self) { topic in
+                            Text(topic).tag(topic)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Message")
+                            .font(.caption.bold())
+                            .foregroundColor(.secondary)
+                        TextEditor(text: $message)
+                            .frame(minHeight: 140)
+                            .scrollContentBackground(.hidden)
+                            .background(Color(.secondarySystemBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                } header: {
+                    Text("Support request")
+                } footer: {
+                    Text("This sends your report to \(destinationLabel) at \(currentRecipientEmail). Include enough detail to reproduce the problem.")
+                }
+
+                Section {
+                    Toggle("Include app and device details", isOn: $includeDiagnosticDetails)
+                }
+
+                Section {
+                    Button {
+                        sendSupportRequest()
+                    } label: {
+                        Label("Send Support Request", systemImage: "paperplane.fill")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .disabled(!canSend)
+                }
+            }
+            .navigationTitle("Support")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Close") { dismiss() }
+                }
+            }
+#if canImport(MessageUI)
+            .sheet(isPresented: $showMailComposer) {
+                MailComposerView(
+                    recipient: currentRecipientEmail,
+                    subject: supportSubject,
+                    body: supportBody
+                )
+            }
+#endif
+            .alert("Mail Not Available", isPresented: $showMailUnavailable) {
+                Button("Copy Email") {
+#if canImport(UIKit)
+                    UIPasteboard.general.string = currentRecipientEmail
+#endif
+                }
+                Button("Copy Report") {
+#if canImport(UIKit)
+                    UIPasteboard.general.string = "\(currentRecipientEmail)\n\n\(supportSubject)\n\n\(supportBody)"
+#endif
+                }
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Set up Mail on this device, or copy the support details and send them to \(currentRecipientEmail).")
+            }
+        }
+    }
+
+    private func sendSupportRequest() {
+#if canImport(MessageUI)
+        if MFMailComposeViewController.canSendMail() {
+            showMailComposer = true
+        } else if let mailtoURL {
+            openURL(mailtoURL) { accepted in
+                if !accepted {
+                    showMailUnavailable = true
+                }
+            }
+        } else {
+            showMailUnavailable = true
+        }
+#else
+        showMailUnavailable = true
+#endif
+    }
+}
 
 // MARK: - Appointment Card
 struct AppointmentCard: View {

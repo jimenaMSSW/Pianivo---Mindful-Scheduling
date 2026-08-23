@@ -6,6 +6,7 @@ import SwiftData
 struct EmployeeDashboard: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Appointment.startTime, order: .forward) private var allAppointments: [Appointment]
+    @Query private var profiles: [BusinessProfile]
     
     let employeeName: String
     var businessCode: String = ""
@@ -16,6 +17,7 @@ struct EmployeeDashboard: View {
     @State private var isShowingSidePanel = false
     @State private var isShowingAddAppointment = false
     @State private var isShowingMessages = false
+    @State private var isShowingSupport = false
     @State private var selectedApptForEdit: Appointment? = nil
     @State private var viewMode: DashboardViewMode = .calendar
     
@@ -31,6 +33,14 @@ struct EmployeeDashboard: View {
         myAppointments
             .filter { Calendar.current.isDateInToday($0.startTime) && $0.statusRaw == "Completed" }
             .reduce(0) { $0 + $1.price }
+    }
+
+    private var businessSupportEmail: String? {
+        let matchedProfile = profiles.first { $0.businessCode == businessCode }
+        if let email = matchedProfile?.email.trimmingCharacters(in: .whitespacesAndNewlines), !email.isEmpty {
+            return email
+        }
+        return nil
     }
 
     // ── Day Load & Rhythm ─────────────────────────────────────────────────
@@ -114,6 +124,13 @@ struct EmployeeDashboard: View {
         .sheet(item: $selectedApptForEdit) { appt in RescheduleSheetView(appointment: appt) }
         .sheet(isPresented: $isShowingMessages) {
             EmployeeInboxView(employeeName: employeeName, allClientNames: Array(Set(myAppointments.map { $0.customerName })))
+        }
+        .sheet(isPresented: $isShowingSupport) {
+            SupportReportSheet(
+                accountName: employeeName,
+                accountType: "Employee",
+                businessSupportEmail: businessSupportEmail
+            )
         }
     }
     
@@ -325,6 +342,15 @@ struct EmployeeDashboard: View {
                         color: .orange
                     ) {
                         isShowingAddAppointment = true
+                        withAnimation { isShowingSidePanel = false }
+                    }
+
+                    sidePanelNavButton(
+                        label: "Support & Errors",
+                        icon: "questionmark.bubble.fill",
+                        color: .teal
+                    ) {
+                        isShowingSupport = true
                         withAnimation { isShowingSidePanel = false }
                     }
                 }
