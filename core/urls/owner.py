@@ -35,3 +35,4 @@ urlpatterns = [
     path('api/messages/', views.api_get_messages, name='api_get_messages'),
     path('api/messages/send/', views.api_send_message, name='api_send_message'),
 ]
+
