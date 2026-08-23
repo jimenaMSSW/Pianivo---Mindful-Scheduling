@@ -13,7 +13,7 @@ from django.core.exceptions import PermissionDenied, ImproperlyConfigured
 from django_ratelimit.decorators import ratelimit
 
 from core.firebase import firebase_status
-from core.models import Business, Appointment, Employee, Conversation, Message, Payment
+from core.models import Business, Appointment, Employee, Conversation, Message, Payment, OwnerSubscription
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,12 @@ def require_stripe():
         raise ImproperlyConfigured("The stripe package is not installed.") from exc
     stripe.api_key = settings.STRIPE_SECRET_KEY
     return stripe
+
+def subscription_status_from_checkout(session):
+    subscription = session.get("subscription")
+    if isinstance(subscription, dict):
+        return subscription.get("status") or session.get("status") or "unknown"
+    return session.get("status") or "unknown"
 
 # --- OWNER VIEWS ---
 
@@ -336,7 +342,27 @@ def stripe_webhook(request):
 
     event_type = event.get('type')
     intent = event.get('data', {}).get('object', {})
-    if event_type in {
+    if event_type == 'checkout.session.completed':
+        session = intent
+        checkout_id = session.get('id')
+        subscription = session.get('subscription')
+        subscription_id = subscription.get('id') if isinstance(subscription, dict) else subscription or ''
+        OwnerSubscription.objects.filter(stripe_checkout_session_id=checkout_id).update(
+            stripe_customer_id=session.get('customer') or '',
+            stripe_subscription_id=subscription_id,
+            status=subscription_status_from_checkout(session),
+        )
+    elif event_type in {'customer.subscription.created', 'customer.subscription.updated', 'customer.subscription.deleted'}:
+        subscription = intent
+        status = subscription.get('status') or 'unknown'
+        current_period_end = subscription.get('current_period_end')
+        updates = {
+            'status': status,
+        }
+        if current_period_end:
+            updates['current_period_end'] = datetime.fromtimestamp(current_period_end, tz=timezone.get_current_timezone())
+        OwnerSubscription.objects.filter(stripe_subscription_id=subscription.get('id')).update(**updates)
+    elif event_type in {
         'payment_intent.succeeded',
         'payment_intent.payment_failed',
         'payment_intent.processing',
@@ -356,6 +382,103 @@ def stripe_webhook(request):
                 payment.appointment.confirm()
 
     return HttpResponse(status=200)
+
+@require_POST
+@csrf_exempt
+@ratelimit(key='ip', rate='5/m', block=True)
+def create_owner_subscription_checkout(request):
+    try:
+        stripe = require_stripe()
+        if not settings.STRIPE_OWNER_SUBSCRIPTION_PRICE_ID:
+            return JsonResponse({"error": "Owner subscription price is not configured."}, status=503)
+
+        data = json.loads(request.body)
+        email = (data.get("email") or "").strip().lower()
+        name = (data.get("name") or "").strip()
+        business_code = (data.get("business_code") or "").strip().upper()
+        if not email or "@" not in email or not name or not business_code:
+            return JsonResponse({"error": "Name, email, and business code are required."}, status=400)
+
+        session = stripe.checkout.Session.create(
+            mode="subscription",
+            customer_email=email,
+            line_items=[{
+                "price": settings.STRIPE_OWNER_SUBSCRIPTION_PRICE_ID,
+                "quantity": 1,
+            }],
+            success_url=f"{settings.APP_BASE_URL}/subscriptions/owner/success/?session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{settings.APP_BASE_URL}/subscriptions/owner/cancel/",
+            client_reference_id=email,
+            metadata={
+                "account_type": "owner",
+                "email": email,
+                "name": name,
+                "business_code": business_code,
+            },
+            subscription_data={
+                "metadata": {
+                    "account_type": "owner",
+                    "email": email,
+                    "business_code": business_code,
+                }
+            },
+        )
+
+        OwnerSubscription.objects.update_or_create(
+            stripe_checkout_session_id=session.id,
+            defaults={
+                "email": email,
+                "name": name,
+                "business_code": business_code,
+                "status": "checkout_started",
+            },
+        )
+        return JsonResponse({"checkout_url": session.url, "session_id": session.id})
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+    except Exception as exc:
+        logger.exception("Owner subscription checkout creation failed")
+        return JsonResponse({"error": str(exc)}, status=400)
+
+@require_GET
+def owner_subscription_status(request):
+    session_id = (request.GET.get("session_id") or "").strip()
+    if not session_id:
+        return JsonResponse({"error": "Missing session_id."}, status=400)
+
+    record = OwnerSubscription.objects.filter(stripe_checkout_session_id=session_id).first()
+    try:
+        stripe = require_stripe()
+        session = stripe.checkout.Session.retrieve(session_id, expand=["subscription"])
+        status = subscription_status_from_checkout(session)
+        subscription = session.get("subscription")
+        subscription_id = subscription.get("id") if isinstance(subscription, dict) else subscription or ''
+        if record:
+            record.stripe_customer_id = session.get("customer") or record.stripe_customer_id
+            record.stripe_subscription_id = subscription_id or record.stripe_subscription_id
+            record.status = status
+            record.save()
+    except Exception:
+        logger.exception("Owner subscription status refresh failed")
+        status = record.status if record else "unknown"
+
+    active = status in {"active", "trialing", "complete"}
+    return JsonResponse({
+        "active": active,
+        "status": status,
+        "email": record.email if record else "",
+        "business_code": record.business_code if record else "",
+        "stripe_customer_id": record.stripe_customer_id if record else "",
+        "stripe_subscription_id": record.stripe_subscription_id if record else "",
+    })
+
+@require_GET
+def owner_subscription_success(request):
+    return render(request, 'core/subscription_success.html')
+
+@require_GET
+def owner_subscription_cancel(request):
+    return render(request, 'core/subscription_cancel.html')
 
 @require_GET
 def privacy_policy(request):

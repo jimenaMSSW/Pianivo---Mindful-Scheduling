@@ -150,6 +150,29 @@ class Payment(models.Model):
     def __str__(self):
         return f"{self.customer_name} {self.amount} {self.currency.upper()} ({self.status})"
 
+class OwnerSubscription(models.Model):
+    email = models.EmailField(db_index=True)
+    name = models.CharField(max_length=100, blank=True)
+    business_code = models.CharField(max_length=32, db_index=True)
+    firebase_uid = models.CharField(max_length=255, blank=True)
+    stripe_checkout_session_id = models.CharField(max_length=255, unique=True)
+    stripe_customer_id = models.CharField(max_length=255, blank=True, db_index=True)
+    stripe_subscription_id = models.CharField(max_length=255, blank=True, db_index=True)
+    status = models.CharField(max_length=50, default="checkout_started")
+    current_period_end = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    @property
+    def is_active(self):
+        return self.status in {"active", "trialing"}
+
+    def __str__(self):
+        return f"{self.email} ({self.status})"
+
 # ==========================
 # Messaging Models
 # ==========================

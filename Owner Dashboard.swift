@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import UIKit
+import FirebaseFirestore
 #if canImport(MessageUI)
 import MessageUI
 #endif
@@ -1450,7 +1451,7 @@ struct EmployeeManagerSheet: View {
                             Text(businessCode)
                                 .font(.system(size: 28, weight: .bold, design: .monospaced))
                                 .foregroundColor(.teal)
-                            Text("Employees enter this code when signing up to join your studio.")
+                            Text("Use email invites to create employee app logins. Manual staff rows only add schedule names.")
                                 .font(.caption).foregroundColor(.secondary)
                             
                             Button {
@@ -1471,7 +1472,7 @@ struct EmployeeManagerSheet: View {
                                 Image(systemName: "envelope.badge.fill").foregroundColor(.teal)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("Send Invite Link").font(.subheadline.bold())
-                                    Text("Email a deep link that auto-fills your studio code").font(.caption).foregroundColor(.secondary)
+                                    Text("Email a one-time signup link tied to the employee's email").font(.caption).foregroundColor(.secondary)
                                 }
                                 Spacer()
                                 Image(systemName: "chevron.right").font(.caption).foregroundColor(.secondary)
@@ -1550,8 +1551,10 @@ struct StaffInviteSheet: View {
     let studioName: String
     
     @State private var recipientEmail = ""
-    @State private var codeCopied = false
     @State private var linkCopied = false
+    @State private var inviteToken = ""
+    @State private var isCreatingInvite = false
+    @State private var inviteError: String?
 #if canImport(MessageUI)
     @State private var showMailComposer = false
     @State private var mailNotAvailable = false
@@ -1559,7 +1562,10 @@ struct StaffInviteSheet: View {
     
     /// Deep link URL employees can tap to auto-fill the invite code on signup
     private var deepLink: String {
-        makeInviteDeepLink(businessCode: businessCode, businessName: studioName)
+        guard !inviteToken.isEmpty else {
+            return "Create an invite email to generate a one-time link."
+        }
+        return makeInviteDeepLink(inviteToken: inviteToken, businessName: studioName)
     }
     
     var body: some View {
@@ -1571,32 +1577,11 @@ struct StaffInviteSheet: View {
                     VStack(spacing: 8) {
                         Image(systemName: "person.badge.plus").font(.system(size: 50)).foregroundColor(.teal)
                         Text("Invite Staff").font(.title2.bold())
-                        Text("Share your studio code or send an invite link directly to your employee's email.")
+                        Text("Send a one-time signup link directly to your employee's email.")
                             .font(.subheadline).foregroundColor(.secondary).multilineTextAlignment(.center)
                     }
                     .padding(.top)
-                    
-                    // Studio Code Block
-                    VStack(spacing: 12) {
-                        Text("STUDIO CODE").font(.caption.bold()).foregroundColor(.secondary).tracking(1.5)
-                        Text(businessCode)
-                            .font(.system(size: 36, weight: .bold, design: .monospaced))
-                            .foregroundColor(.teal)
-                            .padding(.vertical, 18).padding(.horizontal, 30)
-                            .background(Color.teal.opacity(0.08)).cornerRadius(16)
-                        Button {
-                            UIPasteboard.general.string = businessCode
-                            withAnimation { codeCopied = true }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { withAnimation { codeCopied = false } }
-                        } label: {
-                            Label(codeCopied ? "Copied!" : "Copy Code", systemImage: codeCopied ? "checkmark" : "doc.on.doc")
-                                .font(.subheadline.bold()).foregroundColor(codeCopied ? .green : .teal)
-                        }
-                    }
-                    .padding()
-                    .background(RoundedRectangle(cornerRadius: 20).fill(Color(.secondarySystemBackground)))
-                    .padding(.horizontal)
-                    
+
                     // Deep Link Block
                     VStack(alignment: .leading, spacing: 12) {
                         Label("Invite Link", systemImage: "link").font(.caption.bold()).foregroundColor(.secondary)
@@ -1608,7 +1593,7 @@ struct StaffInviteSheet: View {
                             .background(Color(.tertiarySystemBackground))
                             .cornerRadius(8)
                         
-                        Text("When tapped on a device with the app, this link will open Pianivo and pre-fill your studio code automatically.")
+                        Text("When tapped on a device with the app, this link opens Pianivo and fills the employee invite token.")
                             .font(.caption).foregroundColor(.secondary)
                         
                         Button {
@@ -1633,25 +1618,29 @@ struct StaffInviteSheet: View {
                     
                     Button {
 #if canImport(MessageUI)
-                        if MFMailComposeViewController.canSendMail() {
-                            showMailComposer = true
-                        } else {
-                            mailNotAvailable = true
-                        }
+                        Task { await prepareAndSendInviteEmail() }
 #endif
                     } label: {
                         HStack(spacing: 10) {
                             Image(systemName: "paperplane.fill")
-                            Text("Send Invite Email").fontWeight(.semibold)
+                            Text(isCreatingInvite ? "Preparing Invite..." : "Send Invite Email").fontWeight(.semibold)
                         }
                         .frame(maxWidth: .infinity).padding(.vertical, 16)
-                        .background(recipientEmail.contains("@") ? Color.teal : Color.gray.opacity(0.4))
+                        .background(recipientEmail.contains("@") && !isCreatingInvite ? Color.teal : Color.gray.opacity(0.4))
                         .foregroundColor(.white).cornerRadius(16)
                     }
-                    .disabled(!recipientEmail.contains("@"))
+                    .disabled(!recipientEmail.contains("@") || isCreatingInvite)
                     .padding(.horizontal)
+
+                    if let inviteError {
+                        Text(inviteError)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                    }
                     
-                    Text("The email includes your studio code, a tap-to-join link, and sign-up instructions.")
+                    Text("The email includes a one-time token, a tap-to-join link, and sign-up instructions.")
                         .font(.caption).foregroundColor(.secondary).multilineTextAlignment(.center).padding(.horizontal).padding(.bottom, 40)
                 }
             }
@@ -1670,6 +1659,32 @@ struct StaffInviteSheet: View {
 #endif
         }
     }
+
+    private func prepareAndSendInviteEmail() async {
+        let cleanEmail = recipientEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard cleanEmail.contains("@") else {
+            inviteError = "Enter a valid employee email address."
+            return
+        }
+
+        isCreatingInvite = true
+        inviteError = nil
+
+        do {
+            inviteToken = try await StaffInviteService.createInvite(email: cleanEmail, businessCode: businessCode, studioName: studioName)
+#if canImport(MessageUI)
+            if MFMailComposeViewController.canSendMail() {
+                showMailComposer = true
+            } else {
+                mailNotAvailable = true
+            }
+#endif
+        } catch {
+            inviteError = error.localizedDescription
+        }
+
+        isCreatingInvite = false
+    }
     
     private func inviteBody() -> String {
 """
@@ -1680,15 +1695,15 @@ You've been invited to join \(studioName) on Pianivo — mindful appointment sch
 Here's how to get started:
 
 1. Open Pianivo on your device (or download it from the App Store).
-2. Tap the link below to be taken directly to signup with your studio code pre-filled:
+2. Tap the link below to be taken directly to signup with your invite token pre-filled:
 
 \(deepLink)
 
    — OR —
 
-   Tap "Create Account", choose "Employee / Staff", and enter your invite code manually:
+   Tap "Create Account", choose "Employee / Staff", and enter your invite token manually:
 
-   Studio Code: \(businessCode)
+   Invite Token: \(inviteToken)
 
 Once you're in, you'll have access to your schedule, appointments, and client messages.
 

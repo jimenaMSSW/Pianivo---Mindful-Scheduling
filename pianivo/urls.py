@@ -25,6 +25,10 @@ urlpatterns = [
     path('privacy/choices/', views.privacy_choices, name='privacy_choices'),
     path('support/', views.support, name='support'),
     path('book/', views.book_appointment, name='book'),
+    path('subscriptions/owner/checkout/', views.create_owner_subscription_checkout, name='create_owner_subscription_checkout'),
+    path('subscriptions/owner/status/', views.owner_subscription_status, name='owner_subscription_status'),
+    path('subscriptions/owner/success/', views.owner_subscription_success, name='owner_subscription_success'),
+    path('subscriptions/owner/cancel/', views.owner_subscription_cancel, name='owner_subscription_cancel'),
     path('payments/create-intent/', views.create_payment_intent, name='create_payment_intent'),
     path('payments/stripe/webhook/', views.stripe_webhook, name='stripe_webhook'),
 

@@ -345,9 +345,9 @@ func makeInviteCode(for userId: UUID) -> String {
 }
 
 /// Generates a deep-link invite URL that employees can tap to auto-fill their signup
-func makeInviteDeepLink(businessCode: String, businessName: String) -> String {
+func makeInviteDeepLink(inviteToken: String, businessName: String) -> String {
     let encodedName = businessName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? businessName
-    return "pianivo://invite?code=\(businessCode)&studio=\(encodedName)"
+    return "pianivo://invite?token=\(inviteToken)&studio=\(encodedName)"
 }
 
 // MARK: - FIREBASE AUTH
@@ -381,6 +381,156 @@ struct FirebaseUserProfile {
         self.email = email
         self.role = role
         self.businessCode = data["businessCode"] as? String ?? ""
+    }
+}
+
+struct OwnerSubscriptionCheckoutResponse: Decodable {
+    let checkoutURL: URL
+    let sessionID: String
+
+    enum CodingKeys: String, CodingKey {
+        case checkoutURL = "checkout_url"
+        case sessionID = "session_id"
+    }
+}
+
+struct OwnerSubscriptionStatusResponse: Decodable {
+    let active: Bool
+    let status: String
+    let stripeCustomerID: String
+    let stripeSubscriptionID: String
+
+    enum CodingKeys: String, CodingKey {
+        case active
+        case status
+        case stripeCustomerID = "stripe_customer_id"
+        case stripeSubscriptionID = "stripe_subscription_id"
+    }
+}
+
+enum BackendAPIError: LocalizedError {
+    case invalidResponse
+    case serverMessage(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidResponse:
+            return "The server returned an unexpected response."
+        case .serverMessage(let message):
+            return message
+        }
+    }
+}
+
+struct OwnerSubscriptionService {
+    static func createCheckout(name: String, email: String, businessCode: String) async throws -> OwnerSubscriptionCheckoutResponse {
+        var request = URLRequest(url: APIConfig.ownerSubscriptionCheckoutURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "name": name,
+            "email": email,
+            "business_code": businessCode
+        ])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validateBackendResponse(data: data, response: response)
+        return try JSONDecoder().decode(OwnerSubscriptionCheckoutResponse.self, from: data)
+    }
+
+    static func fetchStatus(sessionID: String) async throws -> OwnerSubscriptionStatusResponse {
+        var components = URLComponents(url: APIConfig.ownerSubscriptionStatusURL, resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "session_id", value: sessionID)]
+        guard let url = components.url else {
+            throw BackendAPIError.invalidResponse
+        }
+
+        let (data, response) = try await URLSession.shared.data(from: url)
+        try validateBackendResponse(data: data, response: response)
+        return try JSONDecoder().decode(OwnerSubscriptionStatusResponse.self, from: data)
+    }
+
+    private static func validateBackendResponse(data: Data, response: URLResponse) throws {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw BackendAPIError.invalidResponse
+        }
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+            throw BackendAPIError.serverMessage(message ?? "The server could not complete this request.")
+        }
+    }
+}
+
+struct StaffInviteService {
+    static func createInvite(email: String, businessCode: String, studioName: String) async throws -> String {
+        let token = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        let data: [String: Any] = [
+            "email": email.lowercased(),
+            "businessCode": businessCode,
+            "studioName": studioName,
+            "status": "pending",
+            "createdAt": FieldValue.serverTimestamp(),
+            "expiresAt": Timestamp(date: Calendar.current.date(byAdding: .day, value: 14, to: Date()) ?? Date())
+        ]
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            Firestore.firestore()
+                .collection("staffInvites")
+                .document(token)
+                .setData(data) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+        }
+
+        return token
+    }
+
+    static func validateInvite(token: String, email: String) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            let inviteRef = Firestore.firestore().collection("staffInvites").document(token)
+            Firestore.firestore().runTransaction({ transaction, errorPointer in
+                do {
+                    let snapshot = try transaction.getDocument(inviteRef)
+                    guard let data = snapshot.data() else {
+                        errorPointer?.pointee = NSError(domain: "PianivoInvite", code: 404, userInfo: [NSLocalizedDescriptionKey: "This employee invite was not found."])
+                        return nil
+                    }
+                    guard (data["status"] as? String) == "pending" else {
+                        errorPointer?.pointee = NSError(domain: "PianivoInvite", code: 409, userInfo: [NSLocalizedDescriptionKey: "This employee invite has already been used."])
+                        return nil
+                    }
+                    guard (data["email"] as? String)?.lowercased() == email.lowercased() else {
+                        errorPointer?.pointee = NSError(domain: "PianivoInvite", code: 403, userInfo: [NSLocalizedDescriptionKey: "This invite was sent to a different email address."])
+                        return nil
+                    }
+                    guard let businessCode = data["businessCode"] as? String, !businessCode.isEmpty else {
+                        errorPointer?.pointee = NSError(domain: "PianivoInvite", code: 422, userInfo: [NSLocalizedDescriptionKey: "This invite is missing its business link."])
+                        return nil
+                    }
+
+                    transaction.updateData([
+                        "status": "accepted",
+                        "acceptedAt": FieldValue.serverTimestamp()
+                    ], forDocument: inviteRef)
+                    return businessCode as NSString
+                } catch {
+                    errorPointer?.pointee = error as NSError
+                    return nil
+                }
+            }) { result, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let businessCode = result as? String {
+                    continuation.resume(returning: businessCode)
+                } else {
+                    continuation.resume(throwing: BackendAPIError.invalidResponse)
+                }
+            }
+        }
     }
 }
 
@@ -419,6 +569,31 @@ struct FirebaseAccountService {
 
         try await saveProfile(profile)
         return profile
+    }
+
+    static func createStaffAccount(
+        name: String,
+        email: String,
+        password: String,
+        inviteToken: String
+    ) async throws -> FirebaseUserProfile {
+        let authResult = try await createFirebaseUser(email: email, password: password)
+
+        do {
+            let businessCode = try await StaffInviteService.validateInvite(token: inviteToken, email: email)
+            let profile = FirebaseUserProfile(
+                uid: authResult.user.uid,
+                name: name,
+                email: email,
+                role: "staff",
+                businessCode: businessCode
+            )
+            try await saveProfile(profile)
+            return profile
+        } catch {
+            try? await authResult.user.delete()
+            throw error
+        }
     }
 
     static func signOut() {
@@ -540,6 +715,7 @@ struct MainEntryView: View {
     @State private var userName: String = ""
     @State private var loggedInUserId: UUID? = nil
     @State private var activeSheet: ActiveSheet? = nil
+    @State private var pendingInviteToken = ""
     
     var body: some View {
         Group {
@@ -605,8 +781,21 @@ struct MainEntryView: View {
             if sheet == .signIn {
                 SignInView(selectedRole: $selectedRole, userName: $userName, loggedInUserId: $loggedInUserId)
             } else {
-                CreateAccountView(selectedRole: $selectedRole, userName: $userName, loggedInUserId: $loggedInUserId)
+                CreateAccountView(
+                    selectedRole: $selectedRole,
+                    userName: $userName,
+                    loggedInUserId: $loggedInUserId,
+                    prefilledInviteToken: pendingInviteToken
+                )
             }
+        }
+        .onOpenURL { url in
+            guard url.scheme == "pianivo", url.host == "invite" else {
+                return
+            }
+            let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+            pendingInviteToken = components?.queryItems?.first(where: { $0.name == "token" })?.value ?? ""
+            activeSheet = .createAccount
         }
     }
 }
@@ -708,14 +897,18 @@ struct CreateAccountView: View {
     @Binding var selectedRole: String?
     @Binding var userName: String
     @Binding var loggedInUserId: UUID?
+    let prefilledInviteToken: String
     
     @State private var name = ""
     @State private var email = ""
     @State private var password = ""
-    @State private var inviteCode = ""
+    @State private var inviteToken = ""
     @State private var selectedAccountType = "client"
     @State private var errorMessage: String?
     @State private var isCreatingAccount = false
+    @State private var ownerBusinessCode = ""
+    @State private var ownerCheckoutSessionID = ""
+    @Environment(\.openURL) private var openURL
     
     let accountTypes = [
         ("owner", "Studio Owner", "crown.fill", Color.teal),
@@ -755,7 +948,14 @@ struct CreateAccountView: View {
                         AuthField(icon: "lock", placeholder: "Password", text: $password, isSecure: true)
                         
                         if selectedAccountType == "staff" {
-                            AuthField(icon: "number", placeholder: "Studio Invite Code", text: $inviteCode, isSecure: false)
+                            AuthField(icon: "link", placeholder: "Employee Invite Token", text: $inviteToken, isSecure: false)
+                        }
+
+                        if selectedAccountType == "owner", !ownerCheckoutSessionID.isEmpty {
+                            Text("After you complete Stripe Checkout, return here and tap the button again to finish creating your owner account.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
                         }
                     }
                     .padding(.horizontal)
@@ -767,7 +967,7 @@ struct CreateAccountView: View {
                     Button {
                         Task { await createAccount() }
                     } label: {
-                        Text(isCreatingAccount ? "Creating Account..." : "Create Account")
+                        Text(primaryButtonTitle)
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 16)
@@ -787,7 +987,23 @@ struct CreateAccountView: View {
                     Button("Cancel") { dismiss() }
                 }
             }
+            .onAppear {
+                if !prefilledInviteToken.isEmpty {
+                    inviteToken = prefilledInviteToken
+                    selectedAccountType = "staff"
+                }
+            }
         }
+    }
+
+    private var primaryButtonTitle: String {
+        if isCreatingAccount {
+            return selectedAccountType == "owner" ? "Checking Subscription..." : "Creating Account..."
+        }
+        if selectedAccountType == "owner" {
+            return ownerCheckoutSessionID.isEmpty ? "Subscribe with Stripe" : "I Completed Payment - Create Account"
+        }
+        return "Create Account"
     }
     
     private func createAccount() async {
@@ -804,19 +1020,48 @@ struct CreateAccountView: View {
             return
         }
 
-        let businessCode: String
+        var businessCode: String
+        let staffInviteToken: String
         
         if selectedAccountType == "owner" {
-            // Generate a new unique business code for the owner
-            businessCode = String(UUID().uuidString.prefix(8).uppercased())
-        } else if selectedAccountType == "staff" {
-            // Validate invite code
-            guard !inviteCode.isEmpty else {
-                errorMessage = "Please enter your studio invite code."
+            staffInviteToken = ""
+            businessCode = ownerBusinessCode.isEmpty ? String(UUID().uuidString.prefix(8).uppercased()) : ownerBusinessCode
+            ownerBusinessCode = businessCode
+            if ownerCheckoutSessionID.isEmpty {
+                isCreatingAccount = true
+                errorMessage = nil
+                do {
+                    let checkout = try await OwnerSubscriptionService.createCheckout(name: cleanName, email: cleanEmail, businessCode: businessCode)
+                    ownerCheckoutSessionID = checkout.sessionID
+                    openURL(checkout.checkoutURL)
+                    errorMessage = "Complete your Stripe subscription, then return here to finish account creation."
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+                isCreatingAccount = false
                 return
             }
-            businessCode = inviteCode.uppercased().trimmingCharacters(in: .whitespaces)
+
+            do {
+                let status = try await OwnerSubscriptionService.fetchStatus(sessionID: ownerCheckoutSessionID)
+                guard status.active else {
+                    errorMessage = "Your subscription is not active yet. Current Stripe status: \(status.status)."
+                    return
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+                return
+            }
+        } else if selectedAccountType == "staff" {
+            let cleanInviteToken = inviteToken.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !cleanInviteToken.isEmpty else {
+                errorMessage = "Please open your employee invite link or enter the invite token from your email."
+                return
+            }
+            staffInviteToken = cleanInviteToken
+            businessCode = ""
         } else {
+            staffInviteToken = ""
             businessCode = ""
         }
 
@@ -824,13 +1069,24 @@ struct CreateAccountView: View {
         errorMessage = nil
 
         do {
-            let profile = try await FirebaseAccountService.createAccount(
-                name: cleanName,
-                email: cleanEmail,
-                password: password,
-                role: selectedAccountType,
-                businessCode: businessCode
-            )
+            let profile: FirebaseUserProfile
+            if selectedAccountType == "staff" {
+                profile = try await FirebaseAccountService.createStaffAccount(
+                    name: cleanName,
+                    email: cleanEmail,
+                    password: password,
+                    inviteToken: staffInviteToken
+                )
+                businessCode = profile.businessCode
+            } else {
+                profile = try await FirebaseAccountService.createAccount(
+                    name: cleanName,
+                    email: cleanEmail,
+                    password: password,
+                    role: selectedAccountType,
+                    businessCode: businessCode
+                )
+            }
             let newUser = upsertLocalUserMirror(profile: profile, in: modelContext, existingUsers: users)
 
             // If staff, also create an Employee record linked to the business
