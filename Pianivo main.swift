@@ -1,6 +1,8 @@
 import SwiftUI
 import SwiftData
 import FirebaseCore
+import FirebaseAuth
+import FirebaseFirestore
 
 // MARK: - APP
 
@@ -328,8 +330,7 @@ final class Review: Identifiable {
 
 
 // MARK: - AUTH HELPERS
-// NOTE: Demo only — not cryptographically secure.
-// A real app would use CryptoKit or bcrypt via a backend
+#if DEBUG
 func simpleHash(_ input: String) -> String {
     var hash = 5381
     for char in input.unicodeScalars {
@@ -337,6 +338,7 @@ func simpleHash(_ input: String) -> String {
     }
     return String(hash)
 }
+#endif
 
 func makeInviteCode(for userId: UUID) -> String {
     String(userId.uuidString.prefix(8).uppercased())
@@ -346,6 +348,184 @@ func makeInviteCode(for userId: UUID) -> String {
 func makeInviteDeepLink(businessCode: String, businessName: String) -> String {
     let encodedName = businessName.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? businessName
     return "pianivo://invite?code=\(businessCode)&studio=\(encodedName)"
+}
+
+// MARK: - FIREBASE AUTH
+
+struct FirebaseUserProfile {
+    let uid: String
+    let name: String
+    let email: String
+    let role: String
+    let businessCode: String
+
+    init(uid: String, name: String, email: String, role: String, businessCode: String) {
+        self.uid = uid
+        self.name = name
+        self.email = email
+        self.role = role
+        self.businessCode = businessCode
+    }
+
+    init?(uid: String, data: [String: Any]) {
+        guard
+            let name = data["name"] as? String,
+            let email = data["email"] as? String,
+            let role = data["role"] as? String
+        else {
+            return nil
+        }
+
+        self.uid = uid
+        self.name = name
+        self.email = email
+        self.role = role
+        self.businessCode = data["businessCode"] as? String ?? ""
+    }
+}
+
+enum FirebaseAuthFlowError: LocalizedError {
+    case missingUserProfile
+
+    var errorDescription: String? {
+        switch self {
+        case .missingUserProfile:
+            return "This account is missing its Pianivo profile. Please contact support."
+        }
+    }
+}
+
+struct FirebaseAccountService {
+    static func signIn(email: String, password: String) async throws -> FirebaseUserProfile {
+        let authResult = try await signInWithFirebase(email: email, password: password)
+        return try await fetchProfile(uid: authResult.user.uid)
+    }
+
+    static func createAccount(
+        name: String,
+        email: String,
+        password: String,
+        role: String,
+        businessCode: String
+    ) async throws -> FirebaseUserProfile {
+        let authResult = try await createFirebaseUser(email: email, password: password)
+        let profile = FirebaseUserProfile(
+            uid: authResult.user.uid,
+            name: name,
+            email: email,
+            role: role,
+            businessCode: businessCode
+        )
+
+        try await saveProfile(profile)
+        return profile
+    }
+
+    static func signOut() {
+        try? Auth.auth().signOut()
+    }
+
+    private static func signInWithFirebase(email: String, password: String) async throws -> AuthDataResult {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AuthDataResult, Error>) in
+            Auth.auth().signIn(withEmail: email, password: password) { result, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let result {
+                    continuation.resume(returning: result)
+                } else {
+                    continuation.resume(throwing: FirebaseAuthFlowError.missingUserProfile)
+                }
+            }
+        }
+    }
+
+    private static func createFirebaseUser(email: String, password: String) async throws -> AuthDataResult {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AuthDataResult, Error>) in
+            Auth.auth().createUser(withEmail: email, password: password) { result, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let result {
+                    continuation.resume(returning: result)
+                } else {
+                    continuation.resume(throwing: FirebaseAuthFlowError.missingUserProfile)
+                }
+            }
+        }
+    }
+
+    private static func saveProfile(_ profile: FirebaseUserProfile) async throws {
+        let data: [String: Any] = [
+            "name": profile.name,
+            "email": profile.email,
+            "role": profile.role,
+            "businessCode": profile.businessCode,
+            "createdAt": FieldValue.serverTimestamp(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            Firestore.firestore()
+                .collection("users")
+                .document(profile.uid)
+                .setData(data, merge: true) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+        }
+    }
+
+    private static func fetchProfile(uid: String) async throws -> FirebaseUserProfile {
+        try await withCheckedThrowingContinuation { continuation in
+            Firestore.firestore()
+                .collection("users")
+                .document(uid)
+                .getDocument { snapshot, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+
+                    guard
+                        let data = snapshot?.data(),
+                        let profile = FirebaseUserProfile(uid: uid, data: data)
+                    else {
+                        continuation.resume(throwing: FirebaseAuthFlowError.missingUserProfile)
+                        return
+                    }
+
+                    continuation.resume(returning: profile)
+                }
+        }
+    }
+}
+
+@discardableResult
+func upsertLocalUserMirror(
+    profile: FirebaseUserProfile,
+    in modelContext: ModelContext,
+    existingUsers: [User]
+) -> User {
+    if let existing = existingUsers.first(where: { $0.email.lowercased() == profile.email.lowercased() }) {
+        existing.name = profile.name
+        existing.role = profile.role
+        existing.businessCode = profile.businessCode
+        try? modelContext.save()
+        return existing
+    }
+
+    let localUser = User(
+        name: profile.name,
+        role: profile.role,
+        email: profile.email,
+        passwordHash: "",
+        businessCode: profile.businessCode
+    )
+    modelContext.insert(localUser)
+    try? modelContext.save()
+    return localUser
 }
 
 // MARK: - MAIN ENTRY VIEW
@@ -445,6 +625,7 @@ struct SignInView: View {
     @State private var email = ""
     @State private var password = ""
     @State private var errorMessage: String?
+    @State private var isSigningIn = false
     
     var body: some View {
         NavigationStack {
@@ -465,9 +646,9 @@ struct SignInView: View {
                     }
 
                     Button {
-                        signIn()
+                        Task { await signIn() }
                     } label: {
-                        Text("Sign In")
+                        Text(isSigningIn ? "Signing In..." : "Sign In")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 16)
@@ -481,6 +662,7 @@ struct SignInView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.bottom, 32)
             }
+            .disabled(isSigningIn)
             .navigationTitle("Sign In")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -491,16 +673,28 @@ struct SignInView: View {
         }
     }
     
-    private func signIn() {
-        let hash = simpleHash(password)
-        if let user = users.first(where: { $0.email.lowercased() == email.lowercased() && $0.passwordHash == hash }) {
-            userName = user.name
-            loggedInUserId = user.id
-            selectedRole = user.role
-            dismiss()
-        } else {
-            errorMessage = "Invalid email or password."
+    private func signIn() async {
+        let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !cleanEmail.isEmpty, !password.isEmpty else {
+            errorMessage = "Please enter your email and password."
+            return
         }
+
+        isSigningIn = true
+        errorMessage = nil
+
+        do {
+            let profile = try await FirebaseAccountService.signIn(email: cleanEmail, password: password)
+            let localUser = upsertLocalUserMirror(profile: profile, in: modelContext, existingUsers: users)
+            userName = localUser.name
+            loggedInUserId = localUser.id
+            selectedRole = localUser.role
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+
+        isSigningIn = false
     }
 }
 
@@ -521,6 +715,7 @@ struct CreateAccountView: View {
     @State private var inviteCode = ""
     @State private var selectedAccountType = "client"
     @State private var errorMessage: String?
+    @State private var isCreatingAccount = false
     
     let accountTypes = [
         ("owner", "Studio Owner", "crown.fill", Color.teal),
@@ -570,9 +765,9 @@ struct CreateAccountView: View {
                     }
                     
                     Button {
-                        createAccount()
+                        Task { await createAccount() }
                     } label: {
-                        Text("Create Account")
+                        Text(isCreatingAccount ? "Creating Account..." : "Create Account")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 16)
@@ -584,6 +779,7 @@ struct CreateAccountView: View {
                     .padding(.bottom, 40)
                 }
             }
+            .disabled(isCreatingAccount)
             .navigationTitle("Sign Up")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -594,17 +790,20 @@ struct CreateAccountView: View {
         }
     }
     
-    private func createAccount() {
-        guard !name.isEmpty, !email.isEmpty, !password.isEmpty else {
+    private func createAccount() async {
+        let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        guard !cleanName.isEmpty, !cleanEmail.isEmpty, !password.isEmpty else {
             errorMessage = "Please fill in all fields."
             return
         }
-        guard !users.contains(where: { $0.email.lowercased() == email.lowercased() }) else {
+
+        guard !users.contains(where: { $0.email.lowercased() == cleanEmail }) else {
             errorMessage = "An account with this email already exists."
             return
         }
-        
-        let hash = simpleHash(password)
+
         let businessCode: String
         
         if selectedAccountType == "owner" {
@@ -620,22 +819,36 @@ struct CreateAccountView: View {
         } else {
             businessCode = ""
         }
-        
-        let newUser = User(name: name, role: selectedAccountType, email: email, passwordHash: hash, businessCode: businessCode)
-        modelContext.insert(newUser)
-        
-        // If staff, also create an Employee record linked to the business
-        if selectedAccountType == "staff" {
-            let employee = Employee(name: name, businessCode: businessCode)
-            modelContext.insert(employee)
+
+        isCreatingAccount = true
+        errorMessage = nil
+
+        do {
+            let profile = try await FirebaseAccountService.createAccount(
+                name: cleanName,
+                email: cleanEmail,
+                password: password,
+                role: selectedAccountType,
+                businessCode: businessCode
+            )
+            let newUser = upsertLocalUserMirror(profile: profile, in: modelContext, existingUsers: users)
+
+            // If staff, also create an Employee record linked to the business
+            if selectedAccountType == "staff" {
+                let employee = Employee(name: cleanName, businessCode: businessCode)
+                modelContext.insert(employee)
+                try? modelContext.save()
+            }
+
+            userName = newUser.name
+            loggedInUserId = newUser.id
+            selectedRole = newUser.role
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
         }
-        
-        try? modelContext.save()
-        
-        userName = name
-        loggedInUserId = newUser.id
-        selectedRole = selectedAccountType
-        dismiss()
+
+        isCreatingAccount = false
     }
 }
 
@@ -657,12 +870,21 @@ struct PianivoRootView: View {
     var body: some View {
         Group {
             if role == "owner" {
-                OwnerDashboard(onLogout: { selectedRole = nil })
+                OwnerDashboard(onLogout: {
+                    FirebaseAccountService.signOut()
+                    selectedRole = nil
+                })
             } else if role == "staff" {
                 let businessCode = loggedInUser?.businessCode ?? ""
-                EmployeeDashboard(employeeName: userName, businessCode: businessCode, onLogout: { selectedRole = nil })
+                EmployeeDashboard(employeeName: userName, businessCode: businessCode, onLogout: {
+                    FirebaseAccountService.signOut()
+                    selectedRole = nil
+                })
             } else {
-                ClientTabView(clientName: userName, onLogout: { selectedRole = nil })
+                ClientTabView(clientName: userName, onLogout: {
+                    FirebaseAccountService.signOut()
+                    selectedRole = nil
+                })
             }
         }
     }
