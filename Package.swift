@@ -16,6 +16,7 @@ let package = Package(
         .iOSApplication(
             name: "Pianivo - Mindful Scheduling",
             targets: ["AppModule"],
+            bundleIdentifier: "com.pianivo.mindfulscheduling",
             teamIdentifier: "D345267D4X",
             displayVersion: "1.0",
             bundleVersion: "1",
