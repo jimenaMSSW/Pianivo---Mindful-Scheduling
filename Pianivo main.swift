@@ -113,7 +113,7 @@ enum AppointmentStatus: String, Codable, CaseIterable {
 }
 
 enum RevenuePeriod: String, CaseIterable, Identifiable {
-    case day, week, month
+    case day, week, month, year
     var id: String { self.rawValue }
 }
 

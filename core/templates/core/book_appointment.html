@@ -2,155 +2,719 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pianivo Booking</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Book Appointment</title>
     <script src="https://js.stripe.com/v3/"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #101414;
+            --panel: #171c1c;
+            --panel-strong: #1d2424;
+            --line: rgba(255, 255, 255, 0.1);
+            --text: #f4f7f7;
+            --muted: #9ba7a7;
+            --teal: #1f8f8b;
+            --teal-strong: #24a19c;
+            --teal-soft: rgba(31, 143, 139, 0.16);
+            --danger: #ff7d7d;
+            --warning: #f5c26b;
+            --radius: 8px;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html, body {
+            margin: 0;
+            min-height: 100%;
+            background: var(--bg);
+            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+            letter-spacing: 0;
+        }
+
+        body {
+            padding: max(18px, env(safe-area-inset-top)) 16px max(18px, env(safe-area-inset-bottom));
+        }
+
+        button, input, select {
+            font: inherit;
+        }
+
+        .page {
+            width: min(100%, 760px);
+            margin: 0 auto;
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 18px;
+        }
+
+        .business {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 0;
+        }
+
+        .avatar {
+            width: 46px;
+            height: 46px;
+            border-radius: 8px;
+            display: grid;
+            place-items: center;
+            background: var(--teal-soft);
+            color: var(--teal-strong);
+            font-weight: 800;
+            flex: 0 0 auto;
+        }
+
+        h1, h2, p {
+            margin: 0;
+        }
+
+        h1 {
+            font-size: clamp(1.25rem, 4.8vw, 1.75rem);
+            line-height: 1.1;
+        }
+
+        .subtitle {
+            margin-top: 4px;
+            color: var(--muted);
+            font-size: 0.95rem;
+        }
+
+        .price-pill {
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            padding: 8px 12px;
+            color: var(--teal-strong);
+            background: var(--teal-soft);
+            font-weight: 800;
+            white-space: nowrap;
+        }
+
+        .panel {
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: var(--panel);
+            overflow: hidden;
+        }
+
+        .steps {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            border-bottom: 1px solid var(--line);
+        }
+
+        .step {
+            padding: 13px 8px;
+            text-align: center;
+            color: var(--muted);
+            font-size: 0.82rem;
+            font-weight: 700;
+        }
+
+        .step.active {
+            color: var(--text);
+            background: var(--panel-strong);
+            box-shadow: inset 0 -3px 0 var(--teal-strong);
+        }
+
+        .section {
+            padding: 18px;
+        }
+
+        .section + .section {
+            border-top: 1px solid var(--line);
+        }
+
+        .section-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+
+        h2 {
+            font-size: 1rem;
+        }
+
+        .grid {
+            display: grid;
+            gap: 12px;
+        }
+
+        .two {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        label {
+            display: block;
+            margin-bottom: 7px;
+            color: var(--muted);
+            font-size: 0.82rem;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        input, select {
+            width: 100%;
+            min-height: 48px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: #111616;
+            color: var(--text);
+            padding: 12px 13px;
+            outline: none;
+        }
+
+        input:focus, select:focus {
+            border-color: var(--teal-strong);
+            box-shadow: 0 0 0 3px var(--teal-soft);
+        }
+
+        .duration-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+        }
+
+        .duration-option {
+            min-height: 44px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: #111616;
+            color: var(--text);
+            cursor: pointer;
+            font-weight: 800;
+        }
+
+        .duration-option.active {
+            border-color: var(--teal-strong);
+            background: var(--teal-soft);
+            color: var(--teal-strong);
+        }
+
+        .summary {
+            display: grid;
+            gap: 10px;
+            padding: 14px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: #111616;
+        }
+
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            color: var(--muted);
+            font-size: 0.94rem;
+        }
+
+        .summary-row strong {
+            color: var(--text);
+            text-align: right;
+        }
+
+        .actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 16px;
+        }
+
+        .primary, .secondary {
+            min-height: 50px;
+            border-radius: var(--radius);
+            padding: 0 16px;
+            font-weight: 800;
+            cursor: pointer;
+        }
+
+        .primary {
+            flex: 1;
+            border: 0;
+            background: var(--teal);
+            color: white;
+        }
+
+        .primary:hover {
+            background: var(--teal-strong);
+        }
+
+        .secondary {
+            border: 1px solid var(--line);
+            background: transparent;
+            color: var(--text);
+        }
+
+        button:disabled {
+            cursor: not-allowed;
+            opacity: 0.55;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .message {
+            margin-top: 12px;
+            border-radius: var(--radius);
+            padding: 12px;
+            font-size: 0.92rem;
+        }
+
+        .message.error {
+            color: var(--danger);
+            background: rgba(255, 125, 125, 0.1);
+            border: 1px solid rgba(255, 125, 125, 0.25);
+        }
+
+        .message.success {
+            color: var(--teal-strong);
+            background: var(--teal-soft);
+            border: 1px solid rgba(36, 161, 156, 0.25);
+        }
+
+        .message.warning {
+            color: var(--warning);
+            background: rgba(245, 194, 107, 0.1);
+            border: 1px solid rgba(245, 194, 107, 0.25);
+        }
+
+        .stripe-box {
+            padding: 14px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: #ffffff;
+        }
+
+        @media (max-width: 640px) {
+            body {
+                padding-left: 12px;
+                padding-right: 12px;
+            }
+
+            .header {
+                align-items: flex-start;
+            }
+
+            .price-pill {
+                font-size: 0.9rem;
+                padding: 7px 10px;
+            }
+
+            .section {
+                padding: 15px;
+            }
+
+            .two {
+                grid-template-columns: 1fr;
+            }
+
+            .duration-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+    </style>
 </head>
-<body class="bg-slate-100 text-slate-900">
-    <main class="mx-auto max-w-2xl px-4 py-10">
-        <section class="rounded-lg bg-white p-6 shadow-sm ring-1 ring-slate-200">
-            <div class="mb-6">
-                <h1 class="text-2xl font-bold">Book Appointment</h1>
-                <p class="mt-1 text-sm text-slate-600">
-                    {% if business %}{{ business.name }}{% else %}No business configured{% endif %}
-                </p>
+<body>
+    <main class="page">
+        <header class="header">
+            <div class="business">
+                <div class="avatar" aria-hidden="true">
+                    {% if business %}{{ business.name|slice:":2"|upper }}{% else %}PI{% endif %}
+                </div>
+                <div>
+                    <h1>{% if business %}{{ business.name }}{% else %}Pianivo Booking{% endif %}</h1>
+                    <p class="subtitle">Book and pay for your appointment</p>
+                </div>
+            </div>
+            <div class="price-pill"><span id="header-price">${{ default_amount|floatformat:2 }}</span></div>
+        </header>
+
+        <section class="panel" aria-label="Booking form">
+            <div class="steps">
+                <div id="step-details" class="step active">Details</div>
+                <div id="step-payment" class="step">Payment</div>
+                <div id="step-done" class="step">Done</div>
             </div>
 
-            {% if not stripe_ready %}
-                <div class="mb-5 rounded-md bg-amber-50 p-4 text-sm text-amber-900 ring-1 ring-amber-200">
-                    Stripe is not configured. Set STRIPE_SECRET_KEY and STRIPE_PUBLISHABLE_KEY before accepting payments.
+            {% if not business %}
+                <div class="section">
+                    <div class="message error">No business is configured yet.</div>
                 </div>
             {% endif %}
 
-            <form id="booking-form" class="space-y-4">
+            {% if not stripe_ready %}
+                <div class="section">
+                    <div class="message warning">Payments are not configured yet. Add Stripe keys on the server before accepting bookings.</div>
+                </div>
+            {% endif %}
+
+            <form id="booking-form" class="section">
                 {% csrf_token %}
-                <div>
-                    <label for="customer_name" class="block text-sm font-medium">Name</label>
-                    <input id="customer_name" name="customer_name" autocomplete="name" required
-                           class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200">
-                </div>
-                <div>
-                    <label for="customer_email" class="block text-sm font-medium">Email</label>
-                    <input id="customer_email" name="customer_email" type="email" autocomplete="email" required
-                           class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200">
-                </div>
-                <div class="grid gap-4 sm:grid-cols-2">
-                    <div>
-                        <label for="start_time" class="block text-sm font-medium">Start</label>
-                        <input id="start_time" name="start_time" type="datetime-local" required
-                               class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200">
-                    </div>
-                    <div>
-                        <label for="duration" class="block text-sm font-medium">Duration</label>
-                        <select id="duration" name="duration"
-                                class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200">
-                            <option value="30">30 minutes</option>
-                            <option value="60" selected>60 minutes</option>
-                            <option value="90">90 minutes</option>
-                            <option value="120">120 minutes</option>
-                        </select>
-                    </div>
-                </div>
-                <div>
-                    <label for="amount" class="block text-sm font-medium">Payment Amount ({{ currency }})</label>
-                    <input id="amount" name="amount" type="number" min="0.50" step="0.01" value="{{ default_amount|floatformat:-2 }}"
-                           class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200">
+
+                <div class="section-title">
+                    <h2>Appointment</h2>
                 </div>
 
-                <button id="prepare-payment" type="submit"
-                        class="w-full rounded-md bg-emerald-600 px-4 py-3 font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400">
-                    Continue to Payment
-                </button>
+                <div class="grid">
+                    <div class="grid two">
+                        <div>
+                            <label for="appointment_date">Date</label>
+                            <input id="appointment_date" name="appointment_date" type="date" required>
+                        </div>
+                        <div>
+                            <label for="appointment_time">Time</label>
+                            <input id="appointment_time" name="appointment_time" type="time" required>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label>Duration</label>
+                        <input id="duration" name="duration" type="hidden" value="60">
+                        <div class="duration-grid" role="group" aria-label="Duration">
+                            <button class="duration-option" type="button" data-duration="30">30m</button>
+                            <button class="duration-option active" type="button" data-duration="60">60m</button>
+                            <button class="duration-option" type="button" data-duration="90">90m</button>
+                            <button class="duration-option" type="button" data-duration="120">120m</button>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="amount">Price ({{ currency }})</label>
+                        <input id="amount" name="amount" type="number" min="0.50" step="0.01" value="{{ default_amount|floatformat:2 }}" required>
+                    </div>
+                </div>
+
+                <div class="section-title" style="margin-top: 20px;">
+                    <h2>Your Information</h2>
+                </div>
+
+                <div class="grid two">
+                    <div>
+                        <label for="customer_name">Name</label>
+                        <input id="customer_name" name="customer_name" autocomplete="name" required>
+                    </div>
+                    <div>
+                        <label for="customer_email">Email</label>
+                        <input id="customer_email" name="customer_email" type="email" autocomplete="email" required>
+                    </div>
+                </div>
+
+                <div class="summary" style="margin-top: 16px;">
+                    <div class="summary-row"><span>When</span><strong id="summary-time">Select a date and time</strong></div>
+                    <div class="summary-row"><span>Duration</span><strong id="summary-duration">60 minutes</strong></div>
+                    <div class="summary-row"><span>Total</span><strong id="summary-total">${{ default_amount|floatformat:2 }} {{ currency }}</strong></div>
+                </div>
+
+                <div id="form-message" class="message hidden"></div>
+
+                <div class="actions">
+                    <button id="prepare-payment" class="primary" type="submit" {% if not business or not stripe_ready %}disabled{% endif %}>
+                        Continue to Payment
+                    </button>
+                </div>
             </form>
 
-            <form id="payment-form" class="mt-6 hidden space-y-4">
-                <div id="payment-element"></div>
-                <button id="submit-payment" type="submit"
-                        class="w-full rounded-md bg-slate-900 px-4 py-3 font-semibold text-white hover:bg-slate-800">
-                    Pay
-                </button>
-                <p id="payment-message" class="hidden text-sm"></p>
+            <form id="payment-form" class="section hidden">
+                <div class="section-title">
+                    <h2>Payment</h2>
+                    <button id="back-to-details" class="secondary" type="button">Back</button>
+                </div>
+
+                <div class="summary" style="margin-bottom: 14px;">
+                    <div class="summary-row"><span>Appointment</span><strong id="payment-summary-time">-</strong></div>
+                    <div class="summary-row"><span>Total</span><strong id="payment-summary-total">-</strong></div>
+                </div>
+
+                <div class="stripe-box">
+                    <div id="payment-element"></div>
+                </div>
+
+                <div id="payment-message" class="message hidden"></div>
+
+                <div class="actions">
+                    <button id="submit-payment" class="primary" type="submit">Pay and Book</button>
+                </div>
             </form>
+
+            <section id="success-panel" class="section hidden">
+                <div class="section-title">
+                    <h2>Appointment Requested</h2>
+                </div>
+                <div class="message success">Payment is complete. Your appointment request has been sent to the business.</div>
+                <div class="summary" style="margin-top: 14px;">
+                    <div class="summary-row"><span>When</span><strong id="success-time">-</strong></div>
+                    <div class="summary-row"><span>Total</span><strong id="success-total">-</strong></div>
+                </div>
+            </section>
         </section>
     </main>
 
     <script>
         const stripeKey = "{{ stripe_publishable_key|escapejs }}";
+        const currency = "{{ currency|escapejs }}";
         const bookingForm = document.getElementById("booking-form");
         const paymentForm = document.getElementById("payment-form");
-        const message = document.getElementById("payment-message");
+        const successPanel = document.getElementById("success-panel");
+        const prepareButton = document.getElementById("prepare-payment");
+        const submitButton = document.getElementById("submit-payment");
+        const amountInput = document.getElementById("amount");
+        const dateInput = document.getElementById("appointment_date");
+        const timeInput = document.getElementById("appointment_time");
+        const durationInput = document.getElementById("duration");
+        const formMessage = document.getElementById("form-message");
+        const paymentMessage = document.getElementById("payment-message");
         let stripe;
         let elements;
+        let paymentElement;
+        let latestSummary = { time: "-", total: "-" };
 
         function csrfToken() {
             return document.querySelector("[name=csrfmiddlewaretoken]").value;
         }
 
-        function endTimeFrom(startValue, minutes) {
-            const start = new Date(startValue);
-            return new Date(start.getTime() + minutes * 60000).toISOString();
+        function moneyValue() {
+            const amount = Number(amountInput.value || 0);
+            return `$${amount.toFixed(2)} ${currency}`;
         }
 
-        function showMessage(text, isError = false) {
-            message.textContent = text;
-            message.className = `text-sm ${isError ? "text-rose-700" : "text-emerald-700"}`;
-            message.classList.remove("hidden");
+        function selectedStartDate() {
+            if (!dateInput.value || !timeInput.value) {
+                return null;
+            }
+            return new Date(`${dateInput.value}T${timeInput.value}`);
         }
+
+        function selectedEndDate() {
+            const start = selectedStartDate();
+            if (!start) {
+                return null;
+            }
+            return new Date(start.getTime() + Number(durationInput.value) * 60000);
+        }
+
+        function formatDate(date) {
+            return date.toLocaleString([], {
+                weekday: "short",
+                month: "short",
+                day: "numeric",
+                hour: "numeric",
+                minute: "2-digit"
+            });
+        }
+
+        function showMessage(element, text, type = "error") {
+            element.textContent = text;
+            element.className = `message ${type}`;
+            element.classList.remove("hidden");
+        }
+
+        function clearMessage(element) {
+            element.textContent = "";
+            element.className = "message hidden";
+        }
+
+        function setStep(step) {
+            document.getElementById("step-details").classList.toggle("active", step === "details");
+            document.getElementById("step-payment").classList.toggle("active", step === "payment");
+            document.getElementById("step-done").classList.toggle("active", step === "done");
+        }
+
+        function updateSummary() {
+            const start = selectedStartDate();
+            const duration = Number(durationInput.value);
+            const timeText = start ? formatDate(start) : "Select a date and time";
+            const totalText = moneyValue();
+
+            document.getElementById("summary-time").textContent = timeText;
+            document.getElementById("summary-duration").textContent = `${duration} minutes`;
+            document.getElementById("summary-total").textContent = totalText;
+            document.getElementById("header-price").textContent = totalText.replace(` ${currency}`, "");
+
+            latestSummary = { time: timeText, total: totalText };
+        }
+
+        function validateDetails() {
+            const start = selectedStartDate();
+            const end = selectedEndDate();
+            const amountDollars = Number(amountInput.value || 0);
+
+            if (!bookingForm.reportValidity()) {
+                return null;
+            }
+            if (!start || !end) {
+                showMessage(formMessage, "Choose an appointment date and time.");
+                return null;
+            }
+            if (start.getTime() <= Date.now()) {
+                showMessage(formMessage, "Choose a future appointment time.");
+                return null;
+            }
+            if (amountDollars < 0.5) {
+                showMessage(formMessage, "Payment amount must be at least $0.50.");
+                return null;
+            }
+
+            return {
+                customer_name: new FormData(bookingForm).get("customer_name").trim(),
+                customer_email: new FormData(bookingForm).get("customer_email").trim(),
+                start_time: start.toISOString(),
+                end_time: end.toISOString(),
+                amount: Math.round(amountDollars * 100),
+            };
+        }
+
+        function showPaymentStep() {
+            bookingForm.classList.add("hidden");
+            paymentForm.classList.remove("hidden");
+            successPanel.classList.add("hidden");
+            document.getElementById("payment-summary-time").textContent = latestSummary.time;
+            document.getElementById("payment-summary-total").textContent = latestSummary.total;
+            setStep("payment");
+        }
+
+        function showSuccessStep() {
+            bookingForm.classList.add("hidden");
+            paymentForm.classList.add("hidden");
+            successPanel.classList.remove("hidden");
+            document.getElementById("success-time").textContent = latestSummary.time;
+            document.getElementById("success-total").textContent = latestSummary.total;
+            setStep("done");
+        }
+
+        function initializeDefaults() {
+            const now = new Date();
+            now.setMinutes(now.getMinutes() + 60);
+            const dateString = now.toISOString().slice(0, 10);
+            const hour = String(now.getHours()).padStart(2, "0");
+            const minute = now.getMinutes() < 30 ? "30" : "00";
+
+            dateInput.min = new Date().toISOString().slice(0, 10);
+            dateInput.value = dateString;
+            timeInput.value = `${hour}:${minute}`;
+            updateSummary();
+        }
+
+        document.querySelectorAll(".duration-option").forEach((button) => {
+            button.addEventListener("click", () => {
+                document.querySelectorAll(".duration-option").forEach((option) => option.classList.remove("active"));
+                button.classList.add("active");
+                durationInput.value = button.dataset.duration;
+                updateSummary();
+            });
+        });
+
+        [dateInput, timeInput, amountInput].forEach((input) => {
+            input.addEventListener("input", updateSummary);
+        });
+
+        document.getElementById("back-to-details").addEventListener("click", () => {
+            paymentForm.classList.add("hidden");
+            bookingForm.classList.remove("hidden");
+            prepareButton.disabled = false;
+            clearMessage(paymentMessage);
+            setStep("details");
+        });
 
         bookingForm.addEventListener("submit", async (event) => {
             event.preventDefault();
+            clearMessage(formMessage);
+
             if (!stripeKey) {
-                showMessage("Stripe keys are missing on the server.", true);
+                showMessage(formMessage, "Payments are not configured yet.");
                 return;
             }
 
-            const formData = new FormData(bookingForm);
-            const startTime = formData.get("start_time");
-            const amountDollars = Number(formData.get("amount"));
-            const payload = {
-                customer_name: formData.get("customer_name"),
-                customer_email: formData.get("customer_email"),
-                start_time: new Date(startTime).toISOString(),
-                end_time: endTimeFrom(startTime, Number(formData.get("duration"))),
-                amount: Math.round(amountDollars * 100),
-            };
-
-            document.getElementById("prepare-payment").disabled = true;
-            const response = await fetch("{% url 'create_payment_intent' %}", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "X-CSRFToken": csrfToken(),
-                },
-                body: JSON.stringify(payload),
-            });
-            const data = await response.json();
-            if (!response.ok) {
-                showMessage(data.error || "Could not prepare payment.", true);
-                document.getElementById("prepare-payment").disabled = false;
+            const payload = validateDetails();
+            if (!payload) {
                 return;
             }
 
-            stripe = Stripe(data.publishable_key);
-            elements = stripe.elements({ clientSecret: data.client_secret });
-            elements.create("payment").mount("#payment-element");
-            bookingForm.classList.add("hidden");
-            paymentForm.classList.remove("hidden");
+            prepareButton.disabled = true;
+            prepareButton.textContent = "Preparing payment...";
+
+            try {
+                const response = await fetch("{% url 'create_payment_intent' %}", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-CSRFToken": csrfToken(),
+                    },
+                    body: JSON.stringify(payload),
+                });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || "Could not prepare payment.");
+                }
+
+                stripe = Stripe(data.publishable_key);
+                elements = stripe.elements({
+                    clientSecret: data.client_secret,
+                    appearance: {
+                        theme: "stripe",
+                        variables: {
+                            colorPrimary: "#1f8f8b",
+                            borderRadius: "8px"
+                        }
+                    }
+                });
+
+                if (paymentElement) {
+                    paymentElement.destroy();
+                }
+                paymentElement = elements.create("payment");
+                paymentElement.mount("#payment-element");
+                showPaymentStep();
+            } catch (error) {
+                showMessage(formMessage, error.message || "Could not prepare payment.");
+                prepareButton.disabled = false;
+            } finally {
+                prepareButton.textContent = "Continue to Payment";
+            }
         });
 
         paymentForm.addEventListener("submit", async (event) => {
             event.preventDefault();
+            clearMessage(paymentMessage);
+            submitButton.disabled = true;
+            submitButton.textContent = "Processing...";
+
             const { error } = await stripe.confirmPayment({
                 elements,
+                redirect: "if_required",
                 confirmParams: {
                     return_url: `${window.location.origin}{% url 'book' %}`,
                 },
             });
+
             if (error) {
-                showMessage(error.message, true);
+                showMessage(paymentMessage, error.message || "Payment could not be completed.");
+                submitButton.disabled = false;
+                submitButton.textContent = "Pay and Book";
+                return;
             }
+
+            showSuccessStep();
         });
+
+        const params = new URLSearchParams(window.location.search);
+        if (params.get("redirect_status") === "succeeded") {
+            showSuccessStep();
+        }
+
+        initializeDefaults();
     </script>
 </body>
 </html>

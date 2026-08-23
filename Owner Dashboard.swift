@@ -50,11 +50,19 @@ struct OwnerDashboard: View {
     
     var filteredAppointments: [Appointment] {
         let cleanSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if cleanSearch.isEmpty { return allAppointments }
-        return allAppointments.filter {
+        if cleanSearch.isEmpty { return businessAppointments }
+        return businessAppointments.filter {
             $0.customerName.lowercased().contains(cleanSearch) ||
             $0.employeeName.lowercased().contains(cleanSearch)
         }
+    }
+
+    private var businessAppointments: [Appointment] {
+        ownerBusinessCode.isEmpty ? allAppointments : allAppointments.filter { $0.businessCode == ownerBusinessCode }
+    }
+
+    private var revenueAppointments: [Appointment] {
+        businessAppointments.filter { $0.status == .completed || $0.status == .confirmed }
     }
     
     private var calculatedRevenue: Double {
@@ -63,13 +71,16 @@ struct OwnerDashboard: View {
         
         switch revenuePeriod {
         case .day:
-            appointments = allAppointments.filter { calendar.isDate($0.startTime, inSameDayAs: selectedDate) }
+            appointments = revenueAppointments.filter { calendar.isDate($0.startTime, inSameDayAs: selectedDate) }
         case .week:
             guard let range = calendar.dateInterval(of: .weekOfYear, for: selectedDate) else { return 0 }
-            appointments = allAppointments.filter { range.contains($0.startTime) }
+            appointments = revenueAppointments.filter { range.contains($0.startTime) }
         case .month:
             guard let range = calendar.dateInterval(of: .month, for: selectedDate) else { return 0 }
-            appointments = allAppointments.filter { range.contains($0.startTime) }
+            appointments = revenueAppointments.filter { range.contains($0.startTime) }
+        case .year:
+            guard let range = calendar.dateInterval(of: .year, for: selectedDate) else { return 0 }
+            appointments = revenueAppointments.filter { range.contains($0.startTime) }
         }
         return appointments.reduce(0.0) { $0 + $1.price }
     }
@@ -88,6 +99,8 @@ struct OwnerDashboard: View {
                                 VStack(spacing: 20) {
                                     if activeTab == .dashboard {
                                         dashboardContent
+                                    } else if activeTab == .revenue {
+                                        revenueHubContent
                                     } else {
                                         ContentUnavailableView(columnTitle, systemImage: "hourglass")
                                     }
@@ -173,6 +186,347 @@ struct OwnerDashboard: View {
             }
         }
     }
+
+    private var revenueHubContent: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            revenueHeader
+            revenueOverviewGrid
+            revenueReportPanel
+            revenueTrendPanel
+            revenueServicePanel
+            revenueRecentPaymentsPanel
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 24)
+    }
+
+    private var revenueHeader: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Revenue Hub")
+                        .font(.largeTitle.bold())
+                    Text("Track paid and confirmed appointment revenue for your business.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(selectedDate.formatted(.dateTime.month(.abbreviated).day().year()))
+                        .font(.caption.bold())
+                        .foregroundColor(.secondary)
+                    Button("Today") {
+                        withAnimation { selectedDate = Date() }
+                    }
+                    .font(.caption.bold())
+                    .foregroundColor(.teal)
+                }
+            }
+
+            Picker("Revenue period", selection: $revenuePeriod) {
+                Text("Day").tag(RevenuePeriod.day)
+                Text("Week").tag(RevenuePeriod.week)
+                Text("Month").tag(RevenuePeriod.month)
+                Text("Year").tag(RevenuePeriod.year)
+            }
+            .pickerStyle(.segmented)
+        }
+        .padding(18)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.systemBackground)))
+    }
+
+    private var revenueOverviewGrid: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+            RevenueMetricCard(
+                title: "Today",
+                value: revenueTotal(for: .day).formatted(.currency(code: "USD")),
+                detail: "\(appointmentCount(for: .day)) paid appt.",
+                icon: "sun.max.fill",
+                color: .teal
+            )
+            RevenueMetricCard(
+                title: "This Week",
+                value: revenueTotal(for: .week).formatted(.currency(code: "USD")),
+                detail: "\(appointmentCount(for: .week)) paid appt.",
+                icon: "calendar.badge.clock",
+                color: .indigo
+            )
+            RevenueMetricCard(
+                title: "This Month",
+                value: revenueTotal(for: .month).formatted(.currency(code: "USD")),
+                detail: "\(appointmentCount(for: .month)) paid appt.",
+                icon: "calendar",
+                color: .blue
+            )
+            RevenueMetricCard(
+                title: "This Year",
+                value: revenueTotal(for: .year).formatted(.currency(code: "USD")),
+                detail: "\(appointmentCount(for: .year)) paid appt.",
+                icon: "chart.line.uptrend.xyaxis",
+                color: .green
+            )
+        }
+    }
+
+    private var revenueReportPanel: some View {
+        let total = revenueTotal(for: revenuePeriod)
+        let count = appointmentCount(for: revenuePeriod)
+        let average = count == 0 ? 0 : total / Double(count)
+        let previous = previousRevenueTotal(for: revenuePeriod)
+        let delta = previous == 0 ? nil : ((total - previous) / previous) * 100
+
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Label("\(revenuePeriod.rawValue.capitalized) Report", systemImage: "doc.text.magnifyingglass")
+                    .font(.headline)
+                Spacer()
+                Text(revenueRangeTitle(for: revenuePeriod))
+                    .font(.caption.bold())
+                    .foregroundColor(.secondary)
+            }
+
+            VStack(spacing: 10) {
+                RevenueReportRow(label: "Gross revenue", value: total.formatted(.currency(code: "USD")))
+                RevenueReportRow(label: "Paid appointments", value: "\(count)")
+                RevenueReportRow(label: "Average ticket", value: average.formatted(.currency(code: "USD")))
+                RevenueReportRow(label: "Previous \(revenuePeriod.rawValue)", value: previous.formatted(.currency(code: "USD")))
+                RevenueReportRow(
+                    label: "Change",
+                    value: delta.map { "\($0 >= 0 ? "+" : "")\($0.formatted(.number.precision(.fractionLength(1))))%" } ?? "No prior data",
+                    valueColor: (delta ?? 0) >= 0 ? .green : .red
+                )
+            }
+        }
+        .padding(18)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.systemBackground)))
+    }
+
+    private var revenueTrendPanel: some View {
+        let buckets = revenueBuckets(for: revenuePeriod)
+        let maxTotal = max(buckets.map(\.total).max() ?? 0, 1)
+
+        return VStack(alignment: .leading, spacing: 14) {
+            Label("Revenue Trend", systemImage: "chart.bar.xaxis")
+                .font(.headline)
+
+            if buckets.allSatisfy({ $0.total == 0 }) {
+                ContentUnavailableView("No revenue in this period", systemImage: "chart.bar")
+                    .frame(minHeight: 140)
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(buckets) { bucket in
+                        RevenueBarRow(bucket: bucket, maxTotal: maxTotal)
+                    }
+                }
+            }
+        }
+        .padding(18)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.systemBackground)))
+    }
+
+    private var revenueServicePanel: some View {
+        let services = topRevenueServices()
+
+        return VStack(alignment: .leading, spacing: 14) {
+            Label("Service Breakdown", systemImage: "tag.fill")
+                .font(.headline)
+
+            if services.isEmpty {
+                Text("No paid services found for this report.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(services) { item in
+                        HStack(spacing: 12) {
+                            Circle()
+                                .fill(Color.teal.opacity(0.16))
+                                .frame(width: 36, height: 36)
+                                .overlay(Image(systemName: "dollarsign").font(.caption.bold()).foregroundColor(.teal))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.name)
+                                    .font(.subheadline.bold())
+                                Text("\(item.count) appointment\(item.count == 1 ? "" : "s")")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Text(item.total.formatted(.currency(code: "USD")))
+                                .font(.subheadline.bold())
+                        }
+                        .padding(12)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
+                    }
+                }
+            }
+        }
+        .padding(18)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.systemBackground)))
+    }
+
+    private var revenueRecentPaymentsPanel: some View {
+        let recent = selectedRevenueAppointments().sorted { $0.startTime > $1.startTime }.prefix(8)
+
+        return VStack(alignment: .leading, spacing: 14) {
+            Label("Recent Paid Appointments", systemImage: "creditcard.fill")
+                .font(.headline)
+
+            if recent.isEmpty {
+                Text("Paid appointments will appear here after clients book and pay.")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(Array(recent), id: \.id) { appt in
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(appt.customerName)
+                                    .font(.subheadline.bold())
+                                Text("\(appt.startTime.formatted(date: .abbreviated, time: .shortened)) • \(appt.service?.name ?? "Appointment")")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Text(appt.price.formatted(.currency(code: "USD")))
+                                .font(.subheadline.bold())
+                        }
+                        .padding(.vertical, 6)
+                    }
+                }
+            }
+        }
+        .padding(18)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.systemBackground)))
+    }
+
+    private func dateInterval(for period: RevenuePeriod, from date: Date = Date()) -> DateInterval? {
+        let calendar = Calendar.current
+        switch period {
+        case .day:
+            return calendar.dateInterval(of: .day, for: date)
+        case .week:
+            return calendar.dateInterval(of: .weekOfYear, for: date)
+        case .month:
+            return calendar.dateInterval(of: .month, for: date)
+        case .year:
+            return calendar.dateInterval(of: .year, for: date)
+        }
+    }
+
+    private func previousDateInterval(for period: RevenuePeriod) -> DateInterval? {
+        let calendar = Calendar.current
+        let component: Calendar.Component
+        switch period {
+        case .day: component = .day
+        case .week: component = .weekOfYear
+        case .month: component = .month
+        case .year: component = .year
+        }
+
+        guard let previousDate = calendar.date(byAdding: component, value: -1, to: selectedDate) else {
+            return nil
+        }
+        return dateInterval(for: period, from: previousDate)
+    }
+
+    private func appointments(in interval: DateInterval?) -> [Appointment] {
+        guard let interval else { return [] }
+        return revenueAppointments.filter { interval.contains($0.startTime) }
+    }
+
+    private func selectedRevenueAppointments() -> [Appointment] {
+        appointments(in: dateInterval(for: revenuePeriod, from: selectedDate))
+    }
+
+    private func revenueTotal(for period: RevenuePeriod) -> Double {
+        appointments(in: dateInterval(for: period, from: selectedDate)).reduce(0) { $0 + $1.price }
+    }
+
+    private func previousRevenueTotal(for period: RevenuePeriod) -> Double {
+        appointments(in: previousDateInterval(for: period)).reduce(0) { $0 + $1.price }
+    }
+
+    private func appointmentCount(for period: RevenuePeriod) -> Int {
+        appointments(in: dateInterval(for: period, from: selectedDate)).count
+    }
+
+    private func revenueRangeTitle(for period: RevenuePeriod) -> String {
+        guard let interval = dateInterval(for: period, from: selectedDate) else {
+            return "No range"
+        }
+
+        switch period {
+        case .day:
+            return interval.start.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+        case .week:
+            let end = Calendar.current.date(byAdding: .day, value: -1, to: interval.end) ?? interval.end
+            return "\(interval.start.formatted(.dateTime.month(.abbreviated).day())) - \(end.formatted(.dateTime.month(.abbreviated).day()))"
+        case .month:
+            return interval.start.formatted(.dateTime.month(.wide).year())
+        case .year:
+            return interval.start.formatted(.dateTime.year())
+        }
+    }
+
+    private func revenueBuckets(for period: RevenuePeriod) -> [RevenueBucket] {
+        let calendar = Calendar.current
+        switch period {
+        case .day:
+            return stride(from: 8, through: 20, by: 2).map { hour in
+                let start = calendar.date(bySettingHour: hour, minute: 0, second: 0, of: selectedDate) ?? selectedDate
+                let end = calendar.date(byAdding: .hour, value: 2, to: start) ?? start
+                return RevenueBucket(label: formatHour(hour), total: appointments(in: DateInterval(start: start, end: end)).reduce(0) { $0 + $1.price })
+            }
+        case .week:
+            return getWeekDates().map { date in
+                RevenueBucket(
+                    label: date.formatted(.dateTime.weekday(.narrow)),
+                    total: appointments(in: calendar.dateInterval(of: .day, for: date)).reduce(0) { $0 + $1.price }
+                )
+            }
+        case .month:
+            guard let month = calendar.dateInterval(of: .month, for: selectedDate) else { return [] }
+            var buckets: [RevenueBucket] = []
+            var cursor = month.start
+            var weekNumber = 1
+            while cursor < month.end {
+                let next = min(calendar.date(byAdding: .day, value: 7, to: cursor) ?? month.end, month.end)
+                buckets.append(RevenueBucket(label: "W\(weekNumber)", total: appointments(in: DateInterval(start: cursor, end: next)).reduce(0) { $0 + $1.price }))
+                cursor = next
+                weekNumber += 1
+            }
+            return buckets
+        case .year:
+            guard let year = calendar.dateInterval(of: .year, for: selectedDate) else { return [] }
+            return (0..<12).compactMap { offset in
+                guard let start = calendar.date(byAdding: .month, value: offset, to: year.start),
+                      let month = calendar.dateInterval(of: .month, for: start) else {
+                    return nil
+                }
+                return RevenueBucket(
+                    label: start.formatted(.dateTime.month(.narrow)),
+                    total: appointments(in: month).reduce(0) { $0 + $1.price }
+                )
+            }
+        }
+    }
+
+    private func topRevenueServices() -> [RevenueServiceTotal] {
+        let grouped = Dictionary(grouping: selectedRevenueAppointments()) { appt in
+            appt.service?.name ?? "Appointment"
+        }
+
+        return grouped.map { name, appointments in
+            RevenueServiceTotal(
+                name: name,
+                total: appointments.reduce(0) { $0 + $1.price },
+                count: appointments.count
+            )
+        }
+        .sorted { $0.total > $1.total }
+    }
     
     private var sidePanelMenu: some View {
         ZStack(alignment: .leading) {
@@ -188,7 +542,17 @@ struct OwnerDashboard: View {
                 .padding(.top, 60)
                 
                 SideMenuButton(title: "Dashboard", icon: "square.grid.2x2.fill", isSelected: activeTab == .dashboard) {
-                    withAnimation { isShowingSidePanel = false }
+                    withAnimation {
+                        activeTab = .dashboard
+                        isShowingSidePanel = false
+                    }
+                }
+
+                SideMenuButton(title: "Revenue Reports", icon: "chart.line.uptrend.xyaxis", isSelected: activeTab == .revenue) {
+                    withAnimation {
+                        activeTab = .revenue
+                        isShowingSidePanel = false
+                    }
                 }
                 
                 Divider()
@@ -211,7 +575,7 @@ struct OwnerDashboard: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("REVENUE HUB").font(.caption.bold()).foregroundColor(.secondary)
                     HStack(spacing: 8) {
-                        ForEach([("D", RevenuePeriod.day), ("W", .week), ("M", .month)], id: \.1) { label, period in
+                        ForEach([("D", RevenuePeriod.day), ("W", .week), ("M", .month), ("Y", .year)], id: \.1) { label, period in
                             Button(label) { revenuePeriod = period }
                                 .font(.system(size: 10, weight: .bold)).frame(width: 32, height: 32)
                                 .background(revenuePeriod == period ? Color.teal : Color.teal.opacity(0.1))
@@ -467,6 +831,108 @@ struct SideMenuButton: View {
                 Image(systemName: icon).foregroundColor(isSelected ? .teal : .secondary).frame(width: 24)
                 Text(title).foregroundColor(isSelected ? .primary : .secondary).font(.subheadline.bold()); Spacer()
             }.padding(.vertical, 12).padding(.horizontal, 10).background(isSelected ? Color.teal.opacity(0.1) : Color.clear).cornerRadius(10)
+        }
+    }
+}
+
+private struct RevenueBucket: Identifiable {
+    let id = UUID()
+    let label: String
+    let total: Double
+}
+
+private struct RevenueServiceTotal: Identifiable {
+    let id = UUID()
+    let name: String
+    let total: Double
+    let count: Int
+}
+
+private struct RevenueMetricCard: View {
+    let title: String
+    let value: String
+    let detail: String
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: icon)
+                    .font(.caption.bold())
+                    .foregroundColor(color)
+                    .frame(width: 30, height: 30)
+                    .background(color.opacity(0.12), in: Circle())
+                Spacer()
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.caption.bold())
+                    .foregroundColor(.secondary)
+                    .textCase(.uppercase)
+                Text(value)
+                    .font(.system(.title3, design: .rounded).bold())
+                    .minimumScaleFactor(0.75)
+                    .lineLimit(1)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.systemBackground)))
+    }
+}
+
+private struct RevenueReportRow: View {
+    let label: String
+    let value: String
+    var valueColor: Color = .primary
+
+    var body: some View {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            Spacer()
+            Text(value)
+                .font(.subheadline.bold())
+                .foregroundColor(valueColor)
+                .multilineTextAlignment(.trailing)
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.secondarySystemBackground)))
+    }
+}
+
+private struct RevenueBarRow: View {
+    let bucket: RevenueBucket
+    let maxTotal: Double
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(bucket.label)
+                .font(.caption.bold())
+                .foregroundColor(.secondary)
+                .frame(width: 34, alignment: .leading)
+
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color(.secondarySystemBackground))
+                    Capsule()
+                        .fill(Color.teal)
+                        .frame(width: max(6, proxy.size.width * CGFloat(bucket.total / maxTotal)))
+                }
+            }
+            .frame(height: 10)
+
+            Text(bucket.total.formatted(.currency(code: "USD")))
+                .font(.caption.bold())
+                .frame(width: 82, alignment: .trailing)
         }
     }
 }

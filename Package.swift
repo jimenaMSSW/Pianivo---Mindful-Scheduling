@@ -35,7 +35,8 @@ let package = Package(
                 .reminders(purposeString: "Receive appointment reminders with Pianivo"),
                 .calendars(purposeString: "Pianivo needs calendar access to sync your appointments."),
                 .contacts(purposeString: "Pianivo uses contacts to help you quickly fill in student details."),
-                .faceID(purposeString: "Unlock Pianivo securely using Face ID.")
+                .faceID(purposeString: "Unlock Pianivo securely using Face ID."),
+                .outgoingNetworkConnections()
             ],
             appCategory: .productivity
         )

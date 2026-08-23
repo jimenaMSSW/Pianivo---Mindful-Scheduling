@@ -59,13 +59,14 @@ struct EmployeeDashboard: View {
                             VStack(spacing: 0) {
                                 wellnessHeader
                                 Picker("Scope", selection: $calendarScope) {
-                                    ForEach(RevenuePeriod.allCases) { s in Text(s.rawValue.capitalized).tag(s) }
+                                    ForEach([RevenuePeriod.day, .week, .month]) { s in Text(s.rawValue.capitalized).tag(s) }
                                 }
                                 .pickerStyle(.segmented).padding()
                                 switch calendarScope {
                                 case .day:   visualDayGrid
                                 case .week:  weekGridView
                                 case .month: monthGridView
+                                case .year:  monthGridView
                                 }
                             }
                         }

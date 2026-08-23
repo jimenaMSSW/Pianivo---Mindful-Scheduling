@@ -13,7 +13,7 @@ struct HostedBookingView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
+            ZStack(alignment: .topLeading) {
                 WebPageView(url: url, isLoading: $isLoading, loadError: $loadError)
                     .id(reloadID)
                     .ignoresSafeArea(edges: .bottom)
@@ -30,6 +30,20 @@ struct HostedBookingView: View {
                         openInBrowser: { openURL(url) }
                     )
                 }
+
+                Button {
+                    dismiss()
+                } label: {
+                    Label("Close", systemImage: "xmark")
+                        .labelStyle(.titleAndIcon)
+                        .font(.subheadline.bold())
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(.regularMaterial, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 12)
+                .padding(.leading, 12)
             }
             .task(id: reloadID) {
                 await markAsTimedOutIfNeeded()
@@ -59,7 +73,7 @@ struct HostedBookingView: View {
         }
 
         isLoading = false
-        loadError = "The booking page is taking too long to load. Check that the Render service is awake, then try again."
+        loadError = "The booking page is taking too long to load. Check that the app has outgoing network access, then try again."
     }
 }
 
