@@ -358,5 +358,17 @@ def stripe_webhook(request):
     return HttpResponse(status=200)
 
 @require_GET
+def privacy_policy(request):
+    return render(request, 'core/privacy_policy.html')
+
+@require_GET
+def privacy_choices(request):
+    return render(request, 'core/privacy_choices.html')
+
+@require_GET
+def support(request):
+    return render(request, 'core/support.html')
+
+@require_GET
 def firebase_health(request):
     return JsonResponse(firebase_status())

@@ -11,6 +11,8 @@ struct SupportReportSheet: View {
     let accountType: String
     let businessSupportEmail: String?
     let appSupportEmail = "pianivomindfulscheduling@gmail.com"
+    let privacyPolicyURL = URL(string: "https://pianivo-mindful-scheduling.onrender.com/privacy/")!
+    let privacyChoicesURL = URL(string: "https://pianivo-mindful-scheduling.onrender.com/privacy/choices/")!
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
@@ -144,6 +146,11 @@ struct SupportReportSheet: View {
 
                 Section {
                     Toggle("Include app and device details", isOn: $includeDiagnosticDetails)
+                }
+
+                Section("Legal") {
+                    Link("Privacy Policy", destination: privacyPolicyURL)
+                    Link("Privacy Choices", destination: privacyChoicesURL)
                 }
 
                 Section {

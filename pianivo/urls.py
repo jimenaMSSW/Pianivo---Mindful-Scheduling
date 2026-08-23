@@ -21,6 +21,9 @@ urlpatterns = [
 
     path('whoami/', views.whoami, name='whoami'),
     path('firebase/health/', views.firebase_health, name='firebase_health'),
+    path('privacy/', views.privacy_policy, name='privacy_policy'),
+    path('privacy/choices/', views.privacy_choices, name='privacy_choices'),
+    path('support/', views.support, name='support'),
     path('book/', views.book_appointment, name='book'),
     path('payments/create-intent/', views.create_payment_intent, name='create_payment_intent'),
     path('payments/stripe/webhook/', views.stripe_webhook, name='stripe_webhook'),
