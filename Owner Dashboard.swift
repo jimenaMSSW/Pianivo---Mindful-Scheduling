@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UIKit
 #if canImport(MessageUI)
 import MessageUI
 #endif
@@ -31,6 +32,7 @@ struct OwnerDashboard: View {
     
     // Revenue Toggle State
     @State private var revenuePeriod: RevenuePeriod = .day
+    @State private var revenueReportFile: RevenueReportFile?
     
     // Appointment Management
     @State private var isShowingAddSheet = false
@@ -134,6 +136,9 @@ struct OwnerDashboard: View {
                 .sheet(isPresented: $isShowingServiceManager) { ServiceManagerSheet(businessCode: ownerBusinessCode) }
                 .sheet(isPresented: $isShowingEmployeeManager) { EmployeeManagerSheet(businessCode: ownerBusinessCode) }
                 .sheet(isPresented: $isShowingBusinessProfile) { BusinessProfileSheet() }
+                .sheet(item: $revenueReportFile) { file in
+                    RevenueReportShareSheet(url: file.url)
+                }
                 .alert("Delete Appointment?", isPresented: $isShowingDeleteAlert, presenting: appointmentToDelete) { appt in
                     Button("Delete", role: .destructive) { modelContext.delete(appt) }
                     Button("Cancel", role: .cancel) { appointmentToDelete = nil }
@@ -211,15 +216,26 @@ struct OwnerDashboard: View {
                         .foregroundColor(.secondary)
                 }
                 Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
+                VStack(alignment: .trailing, spacing: 8) {
                     Text(selectedDate.formatted(.dateTime.month(.abbreviated).day().year()))
                         .font(.caption.bold())
                         .foregroundColor(.secondary)
-                    Button("Today") {
-                        withAnimation { selectedDate = Date() }
+                    HStack(spacing: 8) {
+                        Button {
+                            exportRevenueReportPDF()
+                        } label: {
+                            Label("PDF", systemImage: "arrow.down.doc.fill")
+                                .font(.caption.bold())
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.teal)
+
+                        Button("Today") {
+                            withAnimation { selectedDate = Date() }
+                        }
+                        .font(.caption.bold())
+                        .foregroundColor(.teal)
                     }
-                    .font(.caption.bold())
-                    .foregroundColor(.teal)
                 }
             }
 
@@ -526,6 +542,134 @@ struct OwnerDashboard: View {
             )
         }
         .sorted { $0.total > $1.total }
+    }
+
+    private func exportRevenueReportPDF() {
+        let periodName = revenuePeriod.rawValue.capitalized
+        let fileName = "Pianivo-\(revenuePeriod.rawValue)-revenue-report.pdf"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+        let pageBounds = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let renderer = UIGraphicsPDFRenderer(bounds: pageBounds)
+
+        do {
+            try renderer.writePDF(to: url) { context in
+                context.beginPage()
+
+                let margin: CGFloat = 44
+                let maxWidth = pageBounds.width - (margin * 2)
+                var y: CGFloat = 44
+
+                func beginNewPageIfNeeded(_ neededHeight: CGFloat = 28) {
+                    if y + neededHeight > pageBounds.height - margin {
+                        context.beginPage()
+                        y = margin
+                    }
+                }
+
+                func drawText(_ text: String, font: UIFont, color: UIColor = .label, spacing: CGFloat = 8) {
+                    beginNewPageIfNeeded(font.lineHeight + spacing)
+                    let rect = CGRect(x: margin, y: y, width: maxWidth, height: 120)
+                    text.draw(
+                        with: rect,
+                        options: [.usesLineFragmentOrigin, .usesFontLeading],
+                        attributes: [
+                            .font: font,
+                            .foregroundColor: color
+                        ],
+                        context: nil
+                    )
+                    let height = text.boundingRect(
+                        with: CGSize(width: maxWidth, height: .greatestFiniteMagnitude),
+                        options: [.usesLineFragmentOrigin, .usesFontLeading],
+                        attributes: [.font: font],
+                        context: nil
+                    ).height
+                    y += ceil(height) + spacing
+                }
+
+                func drawDivider() {
+                    beginNewPageIfNeeded(16)
+                    UIColor.separator.setStroke()
+                    let path = UIBezierPath()
+                    path.move(to: CGPoint(x: margin, y: y))
+                    path.addLine(to: CGPoint(x: pageBounds.width - margin, y: y))
+                    path.lineWidth = 1
+                    path.stroke()
+                    y += 16
+                }
+
+                func drawRow(_ label: String, _ value: String) {
+                    beginNewPageIfNeeded(24)
+                    label.draw(
+                        at: CGPoint(x: margin, y: y),
+                        withAttributes: [.font: UIFont.systemFont(ofSize: 12), .foregroundColor: UIColor.secondaryLabel]
+                    )
+                    let valueSize = value.size(withAttributes: [.font: UIFont.boldSystemFont(ofSize: 12)])
+                    value.draw(
+                        at: CGPoint(x: pageBounds.width - margin - valueSize.width, y: y),
+                        withAttributes: [.font: UIFont.boldSystemFont(ofSize: 12), .foregroundColor: UIColor.label]
+                    )
+                    y += 24
+                }
+
+                let total = revenueTotal(for: revenuePeriod)
+                let count = appointmentCount(for: revenuePeriod)
+                let average = count == 0 ? 0 : total / Double(count)
+                let previous = previousRevenueTotal(for: revenuePeriod)
+                let deltaText: String
+                if previous == 0 {
+                    deltaText = "No prior data"
+                } else {
+                    let delta = ((total - previous) / previous) * 100
+                    deltaText = "\(delta >= 0 ? "+" : "")\(delta.formatted(.number.precision(.fractionLength(1))))%"
+                }
+
+                drawText("Pianivo Revenue Report", font: .boldSystemFont(ofSize: 26), spacing: 2)
+                drawText("\(periodName) report • \(revenueRangeTitle(for: revenuePeriod))", font: .systemFont(ofSize: 13), color: .secondaryLabel, spacing: 18)
+                drawDivider()
+
+                drawText("Summary", font: .boldSystemFont(ofSize: 17), spacing: 10)
+                drawRow("Gross revenue", total.formatted(.currency(code: "USD")))
+                drawRow("Paid appointments", "\(count)")
+                drawRow("Average ticket", average.formatted(.currency(code: "USD")))
+                drawRow("Previous \(revenuePeriod.rawValue)", previous.formatted(.currency(code: "USD")))
+                drawRow("Change", deltaText)
+                y += 8
+
+                drawText("Revenue Trend", font: .boldSystemFont(ofSize: 17), spacing: 10)
+                for bucket in revenueBuckets(for: revenuePeriod) {
+                    drawRow(bucket.label, bucket.total.formatted(.currency(code: "USD")))
+                }
+                y += 8
+
+                drawText("Service Breakdown", font: .boldSystemFont(ofSize: 17), spacing: 10)
+                let services = topRevenueServices()
+                if services.isEmpty {
+                    drawText("No paid services found for this report.", font: .systemFont(ofSize: 12), color: .secondaryLabel, spacing: 12)
+                } else {
+                    for service in services {
+                        drawRow("\(service.name) (\(service.count))", service.total.formatted(.currency(code: "USD")))
+                    }
+                }
+                y += 8
+
+                drawText("Paid Appointments", font: .boldSystemFont(ofSize: 17), spacing: 10)
+                let appointments = selectedRevenueAppointments().sorted { $0.startTime > $1.startTime }
+                if appointments.isEmpty {
+                    drawText("No paid appointments found for this report.", font: .systemFont(ofSize: 12), color: .secondaryLabel, spacing: 12)
+                } else {
+                    for appointment in appointments {
+                        let serviceName = appointment.service?.name ?? "Appointment"
+                        let label = "\(appointment.customerName) • \(serviceName) • \(appointment.startTime.formatted(date: .abbreviated, time: .shortened))"
+                        drawRow(label, appointment.price.formatted(.currency(code: "USD")))
+                    }
+                }
+            }
+
+            revenueReportFile = RevenueReportFile(url: url)
+        } catch {
+            print("Failed to create revenue report PDF: \(error.localizedDescription)")
+        }
     }
     
     private var sidePanelMenu: some View {
@@ -935,6 +1079,21 @@ private struct RevenueBarRow: View {
                 .frame(width: 82, alignment: .trailing)
         }
     }
+}
+
+private struct RevenueReportFile: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
+private struct RevenueReportShareSheet: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url], applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 // MARK: - ADD APPOINTMENT SHEET (Owner — scoped to business)

@@ -779,7 +779,7 @@ struct BusinessDetailView: View {
         .sheet(item: $bookingService) { svc in
             HostedBookingView(
                 title: "Book \(svc.name)",
-                url: APIConfig.bookingURL
+                url: APIConfig.bookingURL(serviceName: svc.name, price: svc.price)
             )
         }
         .sheet(isPresented: $isShowingReviewSheet) {

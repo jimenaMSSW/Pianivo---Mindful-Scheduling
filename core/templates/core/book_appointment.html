@@ -1,110 +1,130 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Book Appointment</title>
     <script src="https://js.stripe.com/v3/"></script>
     <style>
         :root {
-            color-scheme: dark;
-            --bg: #101414;
-            --panel: #171c1c;
-            --panel-strong: #1d2424;
-            --line: rgba(255, 255, 255, 0.1);
-            --text: #f4f7f7;
-            --muted: #9ba7a7;
+            --bg: #111516;
+            --panel: #181d1e;
+            --panel-soft: #202728;
+            --text: #f5f7f7;
+            --muted: #9aa5a7;
+            --line: #30393b;
             --teal: #1f8f8b;
-            --teal-strong: #24a19c;
-            --teal-soft: rgba(31, 143, 139, 0.16);
-            --danger: #ff7d7d;
-            --warning: #f5c26b;
-            --radius: 8px;
+            --teal-bright: #28b8b2;
+            --error: #ff6b6b;
+            --success: #66d18f;
+            color-scheme: dark;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
         }
 
         * {
             box-sizing: border-box;
         }
 
-        html, body {
+        body {
             margin: 0;
-            min-height: 100%;
+            min-height: 100vh;
             background: var(--bg);
             color: var(--text);
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
-            letter-spacing: 0;
         }
 
-        body {
-            padding: max(18px, env(safe-area-inset-top)) 16px max(18px, env(safe-area-inset-bottom));
-        }
-
-        button, input, select {
+        button,
+        input,
+        select {
             font: inherit;
         }
 
         .page {
-            width: min(100%, 760px);
+            width: min(720px, 100%);
             margin: 0 auto;
+            padding: 18px;
         }
 
-        .header {
+        .topbar {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 16px;
-            margin-bottom: 18px;
-        }
-
-        .business {
-            display: flex;
-            align-items: center;
             gap: 12px;
-            min-width: 0;
+            margin-bottom: 14px;
         }
 
-        .avatar {
-            width: 46px;
-            height: 46px;
-            border-radius: 8px;
-            display: grid;
-            place-items: center;
-            background: var(--teal-soft);
-            color: var(--teal-strong);
-            font-weight: 800;
-            flex: 0 0 auto;
-        }
-
-        h1, h2, p {
-            margin: 0;
-        }
-
-        h1 {
-            font-size: clamp(1.25rem, 4.8vw, 1.75rem);
-            line-height: 1.1;
-        }
-
-        .subtitle {
-            margin-top: 4px;
-            color: var(--muted);
-            font-size: 0.95rem;
-        }
-
-        .price-pill {
-            border: 1px solid var(--line);
+        .close-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 42px;
+            padding: 0 16px;
             border-radius: 999px;
-            padding: 8px 12px;
-            color: var(--teal-strong);
-            background: var(--teal-soft);
-            font-weight: 800;
-            white-space: nowrap;
+            background: rgba(255, 255, 255, 0.12);
+            color: var(--text);
+            text-decoration: none;
+            font-weight: 700;
+        }
+
+        .brand {
+            text-align: right;
+        }
+
+        .brand strong {
+            display: block;
+            font-size: 18px;
+        }
+
+        .brand span {
+            color: var(--muted);
+            font-size: 13px;
         }
 
         .panel {
-            border: 1px solid var(--line);
-            border-radius: var(--radius);
             background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 12px;
             overflow: hidden;
+        }
+
+        .hero {
+            padding: 22px;
+            border-bottom: 1px solid var(--line);
+            background: linear-gradient(135deg, rgba(31, 143, 139, 0.18), rgba(255, 255, 255, 0.03));
+        }
+
+        .eyebrow {
+            margin: 0 0 8px;
+            color: var(--teal-bright);
+            font-size: 12px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: clamp(28px, 7vw, 42px);
+            line-height: 1.05;
+            letter-spacing: 0;
+        }
+
+        .hero-summary {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 16px;
+        }
+
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            min-height: 34px;
+            padding: 0 12px;
+            border-radius: 999px;
+            background: rgba(31, 143, 139, 0.16);
+            color: var(--text);
+            font-weight: 700;
+            font-size: 13px;
         }
 
         .steps {
@@ -114,25 +134,24 @@
         }
 
         .step {
-            padding: 13px 8px;
-            text-align: center;
+            padding: 14px 10px;
             color: var(--muted);
-            font-size: 0.82rem;
-            font-weight: 700;
+            text-align: center;
+            font-size: 13px;
+            font-weight: 800;
         }
 
         .step.active {
-            color: var(--text);
-            background: var(--panel-strong);
-            box-shadow: inset 0 -3px 0 var(--teal-strong);
+            color: var(--teal-bright);
+            box-shadow: inset 0 -2px 0 var(--teal-bright);
         }
 
         .section {
-            padding: 18px;
+            padding: 22px;
         }
 
-        .section + .section {
-            border-top: 1px solid var(--line);
+        .section.hidden {
+            display: none;
         }
 
         .section-title {
@@ -140,19 +159,20 @@
             align-items: center;
             justify-content: space-between;
             gap: 12px;
-            margin-bottom: 14px;
+            margin-bottom: 16px;
         }
 
         h2 {
-            font-size: 1rem;
+            margin: 0;
+            font-size: 18px;
         }
 
         .grid {
             display: grid;
-            gap: 12px;
+            gap: 14px;
         }
 
-        .two {
+        .grid.two {
             grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
@@ -160,64 +180,46 @@
             display: block;
             margin-bottom: 7px;
             color: var(--muted);
-            font-size: 0.82rem;
-            font-weight: 700;
+            font-size: 12px;
+            font-weight: 800;
             text-transform: uppercase;
         }
 
-        input, select {
+        input,
+        select {
             width: 100%;
             min-height: 48px;
+            padding: 0 13px;
             border: 1px solid var(--line);
-            border-radius: var(--radius);
-            background: #111616;
+            border-radius: 8px;
+            background: var(--panel-soft);
             color: var(--text);
-            padding: 12px 13px;
             outline: none;
         }
 
-        input:focus, select:focus {
-            border-color: var(--teal-strong);
-            box-shadow: 0 0 0 3px var(--teal-soft);
-        }
-
-        .duration-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 8px;
-        }
-
-        .duration-option {
-            min-height: 44px;
-            border: 1px solid var(--line);
-            border-radius: var(--radius);
-            background: #111616;
-            color: var(--text);
-            cursor: pointer;
-            font-weight: 800;
-        }
-
-        .duration-option.active {
-            border-color: var(--teal-strong);
-            background: var(--teal-soft);
-            color: var(--teal-strong);
+        input:focus,
+        select:focus {
+            border-color: var(--teal-bright);
+            box-shadow: 0 0 0 3px rgba(40, 184, 178, 0.16);
         }
 
         .summary {
             display: grid;
             gap: 10px;
+            margin-top: 18px;
             padding: 14px;
             border: 1px solid var(--line);
-            border-radius: var(--radius);
-            background: #111616;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.03);
         }
 
         .summary-row {
             display: flex;
+            align-items: center;
             justify-content: space-between;
             gap: 16px;
             color: var(--muted);
-            font-size: 0.94rem;
+            font-size: 14px;
         }
 
         .summary-row strong {
@@ -227,33 +229,29 @@
 
         .actions {
             display: flex;
+            justify-content: flex-end;
             gap: 10px;
-            margin-top: 16px;
+            margin-top: 18px;
         }
 
-        .primary, .secondary {
-            min-height: 50px;
-            border-radius: var(--radius);
-            padding: 0 16px;
-            font-weight: 800;
-            cursor: pointer;
-        }
-
-        .primary {
-            flex: 1;
+        button {
+            min-height: 48px;
+            padding: 0 18px;
             border: 0;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 800;
+        }
+
+        button.primary {
             background: var(--teal);
             color: white;
         }
 
-        .primary:hover {
-            background: var(--teal-strong);
-        }
-
-        .secondary {
-            border: 1px solid var(--line);
-            background: transparent;
+        button.secondary {
+            background: var(--panel-soft);
             color: var(--text);
+            border: 1px solid var(--line);
         }
 
         button:disabled {
@@ -261,89 +259,91 @@
             opacity: 0.55;
         }
 
-        .hidden {
-            display: none !important;
-        }
-
         .message {
-            margin-top: 12px;
-            border-radius: var(--radius);
+            margin-top: 14px;
             padding: 12px;
-            font-size: 0.92rem;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text);
+            font-size: 14px;
         }
 
         .message.error {
-            color: var(--danger);
-            background: rgba(255, 125, 125, 0.1);
-            border: 1px solid rgba(255, 125, 125, 0.25);
-        }
-
-        .message.success {
-            color: var(--teal-strong);
-            background: var(--teal-soft);
-            border: 1px solid rgba(36, 161, 156, 0.25);
+            color: var(--error);
         }
 
         .message.warning {
-            color: var(--warning);
-            background: rgba(245, 194, 107, 0.1);
-            border: 1px solid rgba(245, 194, 107, 0.25);
+            color: #ffd166;
+        }
+
+        .message.success {
+            color: var(--success);
+        }
+
+        .hidden {
+            display: none;
         }
 
         .stripe-box {
             padding: 14px;
-            border: 1px solid var(--line);
-            border-radius: var(--radius);
-            background: #ffffff;
+            border-radius: 8px;
+            background: white;
         }
 
-        @media (max-width: 640px) {
-            body {
-                padding-left: 12px;
-                padding-right: 12px;
+        .done-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 18px;
+        }
+
+        @media (max-width: 560px) {
+            .page {
+                padding: 12px;
             }
 
-            .header {
-                align-items: flex-start;
-            }
-
-            .price-pill {
-                font-size: 0.9rem;
-                padding: 7px 10px;
-            }
-
-            .section {
-                padding: 15px;
-            }
-
-            .two {
+            .grid.two {
                 grid-template-columns: 1fr;
             }
 
-            .duration-grid {
-                grid-template-columns: repeat(2, 1fr);
+            .hero,
+            .section {
+                padding: 18px;
+            }
+
+            .actions,
+            .done-actions {
+                justify-content: stretch;
+            }
+
+            button,
+            .done-actions .close-button {
+                width: 100%;
             }
         }
     </style>
 </head>
 <body>
     <main class="page">
-        <header class="header">
-            <div class="business">
-                <div class="avatar" aria-hidden="true">
-                    {% if business %}{{ business.name|slice:":2"|upper }}{% else %}PI{% endif %}
-                </div>
-                <div>
-                    <h1>{% if business %}{{ business.name }}{% else %}Pianivo Booking{% endif %}</h1>
-                    <p class="subtitle">Book and pay for your appointment</p>
-                </div>
+        <div class="topbar">
+            <a class="close-button" href="pianivo://close-booking">Close</a>
+            <div class="brand">
+                <strong>{% if business %}{{ business.name }}{% else %}Pianivo{% endif %}</strong>
+                <span>Secure booking</span>
             </div>
-            <div class="price-pill"><span id="header-price">${{ default_amount|floatformat:2 }}</span></div>
-        </header>
+        </div>
 
-        <section class="panel" aria-label="Booking form">
+        <section class="panel" aria-label="Book appointment">
+            <header class="hero">
+                <p class="eyebrow">Book Appointment</p>
+                <h1 id="service-heading">Select your service</h1>
+                <div class="hero-summary">
+                    <span class="pill" id="header-price">${{ default_amount|floatformat:2 }} {{ currency }}</span>
+                    <span class="pill">Secure checkout</span>
+                </div>
+            </header>
+
             <div class="steps">
-                <div id="step-details" class="step active">Details</div>
+                <div id="step-details" class="step active">Service</div>
                 <div id="step-payment" class="step">Payment</div>
                 <div id="step-done" class="step">Done</div>
             </div>
@@ -364,10 +364,15 @@
                 {% csrf_token %}
 
                 <div class="section-title">
-                    <h2>Appointment</h2>
+                    <h2>Choose Service</h2>
                 </div>
 
                 <div class="grid">
+                    <div>
+                        <label for="service">Service</label>
+                        <select id="service" name="service" required></select>
+                    </div>
+
                     <div class="grid two">
                         <div>
                             <label for="appointment_date">Date</label>
@@ -377,22 +382,6 @@
                             <label for="appointment_time">Time</label>
                             <input id="appointment_time" name="appointment_time" type="time" required>
                         </div>
-                    </div>
-
-                    <div>
-                        <label>Duration</label>
-                        <input id="duration" name="duration" type="hidden" value="60">
-                        <div class="duration-grid" role="group" aria-label="Duration">
-                            <button class="duration-option" type="button" data-duration="30">30m</button>
-                            <button class="duration-option active" type="button" data-duration="60">60m</button>
-                            <button class="duration-option" type="button" data-duration="90">90m</button>
-                            <button class="duration-option" type="button" data-duration="120">120m</button>
-                        </div>
-                    </div>
-
-                    <div>
-                        <label for="amount">Price ({{ currency }})</label>
-                        <input id="amount" name="amount" type="number" min="0.50" step="0.01" value="{{ default_amount|floatformat:2 }}" required>
                     </div>
                 </div>
 
@@ -411,9 +400,9 @@
                     </div>
                 </div>
 
-                <div class="summary" style="margin-top: 16px;">
+                <div class="summary">
+                    <div class="summary-row"><span>Service</span><strong id="summary-service">Select a service</strong></div>
                     <div class="summary-row"><span>When</span><strong id="summary-time">Select a date and time</strong></div>
-                    <div class="summary-row"><span>Duration</span><strong id="summary-duration">60 minutes</strong></div>
                     <div class="summary-row"><span>Total</span><strong id="summary-total">${{ default_amount|floatformat:2 }} {{ currency }}</strong></div>
                 </div>
 
@@ -433,6 +422,7 @@
                 </div>
 
                 <div class="summary" style="margin-bottom: 14px;">
+                    <div class="summary-row"><span>Service</span><strong id="payment-summary-service">-</strong></div>
                     <div class="summary-row"><span>Appointment</span><strong id="payment-summary-time">-</strong></div>
                     <div class="summary-row"><span>Total</span><strong id="payment-summary-total">-</strong></div>
                 </div>
@@ -453,9 +443,13 @@
                     <h2>Appointment Requested</h2>
                 </div>
                 <div class="message success">Payment is complete. Your appointment request has been sent to the business.</div>
-                <div class="summary" style="margin-top: 14px;">
+                <div class="summary">
+                    <div class="summary-row"><span>Service</span><strong id="success-service">-</strong></div>
                     <div class="summary-row"><span>When</span><strong id="success-time">-</strong></div>
                     <div class="summary-row"><span>Total</span><strong id="success-total">-</strong></div>
+                </div>
+                <div class="done-actions">
+                    <a class="close-button" href="pianivo://close-booking">Done</a>
                 </div>
             </section>
         </section>
@@ -464,28 +458,42 @@
     <script>
         const stripeKey = "{{ stripe_publishable_key|escapejs }}";
         const currency = "{{ currency|escapejs }}";
+        const defaultAmount = Number("{{ default_amount|escapejs }}");
+        const params = new URLSearchParams(window.location.search);
+        const queryService = (params.get("service") || "").trim();
+        const queryPrice = Number(params.get("price") || defaultAmount);
+        const serviceOptions = queryService && Number.isFinite(queryPrice) && queryPrice >= 0.5
+            ? [{ name: queryService, price: queryPrice }]
+            : [
+                { name: "Standard Appointment", price: defaultAmount },
+                { name: "Premium Service", price: 75 },
+                { name: "Signature Service", price: 120 }
+            ];
+
         const bookingForm = document.getElementById("booking-form");
         const paymentForm = document.getElementById("payment-form");
         const successPanel = document.getElementById("success-panel");
         const prepareButton = document.getElementById("prepare-payment");
         const submitButton = document.getElementById("submit-payment");
-        const amountInput = document.getElementById("amount");
+        const serviceSelect = document.getElementById("service");
         const dateInput = document.getElementById("appointment_date");
         const timeInput = document.getElementById("appointment_time");
-        const durationInput = document.getElementById("duration");
         const formMessage = document.getElementById("form-message");
         const paymentMessage = document.getElementById("payment-message");
         let stripe;
         let elements;
         let paymentElement;
-        let latestSummary = { time: "-", total: "-" };
+        let latestSummary = { service: "-", time: "-", total: "-" };
 
         function csrfToken() {
             return document.querySelector("[name=csrfmiddlewaretoken]").value;
         }
 
-        function moneyValue() {
-            const amount = Number(amountInput.value || 0);
+        function selectedService() {
+            return serviceOptions[Number(serviceSelect.value || 0)] || serviceOptions[0];
+        }
+
+        function moneyValue(amount) {
             return `$${amount.toFixed(2)} ${currency}`;
         }
 
@@ -501,7 +509,7 @@
             if (!start) {
                 return null;
             }
-            return new Date(start.getTime() + Number(durationInput.value) * 60000);
+            return new Date(start.getTime() + 60 * 60000);
         }
 
         function formatDate(date) {
@@ -532,23 +540,24 @@
         }
 
         function updateSummary() {
+            const service = selectedService();
             const start = selectedStartDate();
-            const duration = Number(durationInput.value);
             const timeText = start ? formatDate(start) : "Select a date and time";
-            const totalText = moneyValue();
+            const totalText = moneyValue(service.price);
 
+            document.getElementById("service-heading").textContent = service.name;
+            document.getElementById("summary-service").textContent = service.name;
             document.getElementById("summary-time").textContent = timeText;
-            document.getElementById("summary-duration").textContent = `${duration} minutes`;
             document.getElementById("summary-total").textContent = totalText;
-            document.getElementById("header-price").textContent = totalText.replace(` ${currency}`, "");
+            document.getElementById("header-price").textContent = totalText;
 
-            latestSummary = { time: timeText, total: totalText };
+            latestSummary = { service: service.name, time: timeText, total: totalText };
         }
 
         function validateDetails() {
+            const service = selectedService();
             const start = selectedStartDate();
             const end = selectedEndDate();
-            const amountDollars = Number(amountInput.value || 0);
 
             if (!bookingForm.reportValidity()) {
                 return null;
@@ -561,17 +570,19 @@
                 showMessage(formMessage, "Choose a future appointment time.");
                 return null;
             }
-            if (amountDollars < 0.5) {
-                showMessage(formMessage, "Payment amount must be at least $0.50.");
+            if (service.price < 0.5) {
+                showMessage(formMessage, "This service price must be at least $0.50.");
                 return null;
             }
 
+            const formData = new FormData(bookingForm);
             return {
-                customer_name: new FormData(bookingForm).get("customer_name").trim(),
-                customer_email: new FormData(bookingForm).get("customer_email").trim(),
+                customer_name: formData.get("customer_name").trim(),
+                customer_email: formData.get("customer_email").trim(),
+                service_name: service.name,
                 start_time: start.toISOString(),
                 end_time: end.toISOString(),
-                amount: Math.round(amountDollars * 100),
+                amount: Math.round(service.price * 100),
             };
         }
 
@@ -579,6 +590,7 @@
             bookingForm.classList.add("hidden");
             paymentForm.classList.remove("hidden");
             successPanel.classList.add("hidden");
+            document.getElementById("payment-summary-service").textContent = latestSummary.service;
             document.getElementById("payment-summary-time").textContent = latestSummary.time;
             document.getElementById("payment-summary-total").textContent = latestSummary.total;
             setStep("payment");
@@ -588,9 +600,19 @@
             bookingForm.classList.add("hidden");
             paymentForm.classList.add("hidden");
             successPanel.classList.remove("hidden");
+            document.getElementById("success-service").textContent = latestSummary.service;
             document.getElementById("success-time").textContent = latestSummary.time;
             document.getElementById("success-total").textContent = latestSummary.total;
             setStep("done");
+        }
+
+        function initializeServices() {
+            serviceOptions.forEach((service, index) => {
+                const option = document.createElement("option");
+                option.value = String(index);
+                option.textContent = `${service.name} - ${moneyValue(service.price)}`;
+                serviceSelect.appendChild(option);
+            });
         }
 
         function initializeDefaults() {
@@ -606,16 +628,7 @@
             updateSummary();
         }
 
-        document.querySelectorAll(".duration-option").forEach((button) => {
-            button.addEventListener("click", () => {
-                document.querySelectorAll(".duration-option").forEach((option) => option.classList.remove("active"));
-                button.classList.add("active");
-                durationInput.value = button.dataset.duration;
-                updateSummary();
-            });
-        });
-
-        [dateInput, timeInput, amountInput].forEach((input) => {
+        [serviceSelect, dateInput, timeInput].forEach((input) => {
             input.addEventListener("input", updateSummary);
         });
 
@@ -709,11 +722,11 @@
             showSuccessStep();
         });
 
-        const params = new URLSearchParams(window.location.search);
         if (params.get("redirect_status") === "succeeded") {
             showSuccessStep();
         }
 
+        initializeServices();
         initializeDefaults();
     </script>
 </body>

@@ -14,7 +14,12 @@ struct HostedBookingView: View {
     var body: some View {
         NavigationStack {
             ZStack(alignment: .topLeading) {
-                WebPageView(url: url, isLoading: $isLoading, loadError: $loadError)
+                WebPageView(
+                    url: url,
+                    isLoading: $isLoading,
+                    loadError: $loadError,
+                    onClose: { dismiss() }
+                )
                     .id(reloadID)
                     .ignoresSafeArea(edges: .bottom)
 
@@ -44,6 +49,7 @@ struct HostedBookingView: View {
                 .buttonStyle(.plain)
                 .padding(.top, 12)
                 .padding(.leading, 12)
+                .zIndex(2)
             }
             .task(id: reloadID) {
                 await markAsTimedOutIfNeeded()
@@ -115,9 +121,10 @@ private struct WebPageView: UIViewRepresentable {
     let url: URL
     @Binding var isLoading: Bool
     @Binding var loadError: String?
+    let onClose: () -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(isLoading: $isLoading, loadError: $loadError)
+        Coordinator(isLoading: $isLoading, loadError: $loadError, onClose: onClose)
     }
 
     func makeUIView(context: Context) -> WKWebView {
@@ -138,10 +145,24 @@ private struct WebPageView: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate {
         @Binding private var isLoading: Bool
         @Binding private var loadError: String?
+        private let onClose: () -> Void
 
-        init(isLoading: Binding<Bool>, loadError: Binding<String?>) {
+        init(isLoading: Binding<Bool>, loadError: Binding<String?>, onClose: @escaping () -> Void) {
             _isLoading = isLoading
             _loadError = loadError
+            self.onClose = onClose
+        }
+
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            if let url = navigationAction.request.url,
+               url.scheme == "pianivo",
+               url.host == "close-booking" {
+                onClose()
+                decisionHandler(.cancel)
+                return
+            }
+
+            decisionHandler(.allow)
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
