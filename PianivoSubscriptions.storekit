@@ -1,0 +1,83 @@
+{
+  "appPolicies" : {
+    "eula" : "",
+    "policies" : [
+      {
+        "locale" : "en_US",
+        "policyText" : "",
+        "policyURL" : ""
+      }
+    ]
+  },
+  "identifier" : "D6F73A21",
+  "nonRenewingSubscriptions" : [
+  ],
+  "products" : [
+  ],
+  "settings" : {
+    "_askToBuyEnabled" : false,
+    "_billingGracePeriodEnabled" : false,
+    "_billingIssuesEnabled" : false,
+    "_disableDialogs" : false,
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_renewalBillingIssuesEnabled" : false,
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+    ],
+    "_timeRate" : 0
+  },
+  "subscriptionBundleGroups" : [
+  ],
+  "subscriptionGroups" : [
+    {
+      "id" : "E8247C5A",
+      "localizations" : [
+      ],
+      "name" : "Pianivo Owner Access",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+          ],
+          "billingPlans" : [
+            {
+              "billingPlanType" : "BILLED_UPFRONT",
+              "commitmentDisplayPrice" : "169.99",
+              "displayPrice" : "169.99",
+              "internalID" : "A19E3D04",
+              "isEnabled" : true
+            }
+          ],
+          "codeOffers" : [
+          ],
+          "displayPrice" : "169.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "B42F9C81",
+          "introductoryOffers" : [
+          ],
+          "localizations" : [
+            {
+              "description" : "Monthly owner access for managing Pianivo scheduling, staff, services, and appointments.",
+              "displayName" : "Pianivo Owner Monthly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.pianivo.mindfulscheduling.owner.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Pianivo Owner Monthly",
+          "subscriptionGroupID" : "E8247C5A",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+          ]
+        }
+      ]
+    }
+  ],
+  "subscriptionSuiteGroups" : [
+  ],
+  "version" : {
+    "major" : 6,
+    "minor" : 3
+  }
+}

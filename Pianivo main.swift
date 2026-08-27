@@ -1,7 +1,10 @@
 import SwiftUI
 import SwiftData
+import StoreKit
+import UIKit
 import FirebaseCore
 import FirebaseAuth
+
 import FirebaseFirestore
 
 // MARK: - APP
@@ -384,30 +387,6 @@ struct FirebaseUserProfile {
     }
 }
 
-struct OwnerSubscriptionCheckoutResponse: Decodable {
-    let checkoutURL: URL
-    let sessionID: String
-
-    enum CodingKeys: String, CodingKey {
-        case checkoutURL = "checkout_url"
-        case sessionID = "session_id"
-    }
-}
-
-struct OwnerSubscriptionStatusResponse: Decodable {
-    let active: Bool
-    let status: String
-    let stripeCustomerID: String
-    let stripeSubscriptionID: String
-
-    enum CodingKeys: String, CodingKey {
-        case active
-        case status
-        case stripeCustomerID = "stripe_customer_id"
-        case stripeSubscriptionID = "stripe_subscription_id"
-    }
-}
-
 enum BackendAPIError: LocalizedError {
     case invalidResponse
     case serverMessage(String)
@@ -422,42 +401,155 @@ enum BackendAPIError: LocalizedError {
     }
 }
 
-struct OwnerSubscriptionService {
-    static func createCheckout(name: String, email: String, businessCode: String) async throws -> OwnerSubscriptionCheckoutResponse {
-        var request = URLRequest(url: APIConfig.ownerSubscriptionCheckoutURL)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: [
-            "name": name,
-            "email": email,
-            "business_code": businessCode
-        ])
+enum OwnerSubscriptionProduct {
+    static let monthly = "com.pianivo.mindfulscheduling.owner.monthly"
+    static let allIDs = [monthly]
+}
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try validateBackendResponse(data: data, response: response)
-        return try JSONDecoder().decode(OwnerSubscriptionCheckoutResponse.self, from: data)
+enum OwnerIAPSubscriptionError: LocalizedError {
+    case productUnavailable
+    case purchasePending
+    case purchaseCancelled
+    case unverifiedPurchase
+
+    var errorDescription: String? {
+        switch self {
+        case .productUnavailable:
+            return "The owner subscription is not available yet. Make sure the product ID is created in App Store Connect."
+        case .purchasePending:
+            return "The subscription is pending approval from Apple. You can finish account creation after it is approved."
+        case .purchaseCancelled:
+            return "The subscription was cancelled."
+        case .unverifiedPurchase:
+            return "Apple could not verify this subscription. Please try again."
+        }
+    }
+}
+
+enum AccountDeletionError: LocalizedError {
+    case missingAuthenticatedUser
+    case missingEmail
+
+    var errorDescription: String? {
+        switch self {
+        case .missingAuthenticatedUser:
+            return "No signed-in Pianivo account was found."
+        case .missingEmail:
+            return "This account is missing an email address."
+        }
+    }
+}
+
+@MainActor
+final class OwnerIAPSubscriptionService: ObservableObject {
+    @Published private(set) var products: [Product] = []
+    @Published private(set) var hasActiveOwnerSubscription = false
+
+    private var transactionUpdatesTask: Task<Void, Never>?
+
+    var ownerProduct: Product? {
+        products.first { $0.id == OwnerSubscriptionProduct.monthly }
     }
 
-    static func fetchStatus(sessionID: String) async throws -> OwnerSubscriptionStatusResponse {
-        var components = URLComponents(url: APIConfig.ownerSubscriptionStatusURL, resolvingAgainstBaseURL: false)!
-        components.queryItems = [URLQueryItem(name: "session_id", value: sessionID)]
-        guard let url = components.url else {
-            throw BackendAPIError.invalidResponse
-        }
-
-        let (data, response) = try await URLSession.shared.data(from: url)
-        try validateBackendResponse(data: data, response: response)
-        return try JSONDecoder().decode(OwnerSubscriptionStatusResponse.self, from: data)
+    var displayPrice: String {
+        ownerProduct?.displayPrice ?? "App Store subscription required"
     }
 
-    private static func validateBackendResponse(data: Data, response: URLResponse) throws {
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw BackendAPIError.invalidResponse
+    init() {
+        transactionUpdatesTask = listenForTransactionUpdates()
+        Task {
+            await refreshEntitlements()
+            await loadProducts()
         }
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-            throw BackendAPIError.serverMessage(message ?? "The server could not complete this request.")
+    }
+
+    deinit {
+        transactionUpdatesTask?.cancel()
+    }
+
+    func loadProducts() async {
+        do {
+            products = try await Product.products(for: OwnerSubscriptionProduct.allIDs)
+        } catch {
+            products = []
         }
+    }
+
+    func purchaseOwnerSubscription() async throws {
+        if ownerProduct == nil {
+            await loadProducts()
+        }
+
+        guard let product = ownerProduct else {
+            throw OwnerIAPSubscriptionError.productUnavailable
+        }
+
+        let result = try await product.purchase()
+        switch result {
+        case .success(.verified(let transaction)):
+            try await handleVerified(transaction)
+        case .success(.unverified):
+            throw OwnerIAPSubscriptionError.unverifiedPurchase
+        case .pending:
+            throw OwnerIAPSubscriptionError.purchasePending
+        case .userCancelled:
+            throw OwnerIAPSubscriptionError.purchaseCancelled
+        @unknown default:
+            throw OwnerIAPSubscriptionError.productUnavailable
+        }
+    }
+
+    func restorePurchases() async throws {
+        try await AppStore.sync()
+        await refreshEntitlements()
+    }
+
+    func refreshEntitlements() async {
+        var activeSubscriptionFound = false
+
+        for await result in StoreKit.Transaction.currentEntitlements {
+            guard case .verified(let transaction) = result else {
+                continue
+            }
+            guard transaction.productID == OwnerSubscriptionProduct.monthly else {
+                continue
+            }
+            guard transaction.revocationDate == nil else {
+                continue
+            }
+            if let expirationDate = transaction.expirationDate, expirationDate < Date() {
+                continue
+            }
+
+            activeSubscriptionFound = true
+        }
+
+        hasActiveOwnerSubscription = activeSubscriptionFound
+    }
+
+    private func listenForTransactionUpdates() -> Task<Void, Never> {
+        Task { [weak self] in
+            for await result in StoreKit.Transaction.updates {
+                guard let self else {
+                    return
+                }
+
+                if case .verified(let transaction) = result {
+                    try? await self.handleVerified(transaction)
+                }
+            }
+        }
+    }
+
+    private func handleVerified(_ transaction: StoreKit.Transaction) async throws {
+        if transaction.productID == OwnerSubscriptionProduct.monthly,
+           transaction.revocationDate == nil,
+           transaction.expirationDate.map({ $0 >= Date() }) ?? true {
+            hasActiveOwnerSubscription = true
+        }
+
+        await transaction.finish()
+        await refreshEntitlements()
     }
 }
 
@@ -600,6 +692,50 @@ struct FirebaseAccountService {
         try? Auth.auth().signOut()
     }
 
+    static func deleteCurrentAccount(password: String) async throws {
+        guard let user = Auth.auth().currentUser else {
+            throw AccountDeletionError.missingAuthenticatedUser
+        }
+        guard let email = user.email else {
+            throw AccountDeletionError.missingEmail
+        }
+
+        let credential = EmailAuthProvider.credential(withEmail: email, password: password)
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            user.reauthenticate(with: credential) { _, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
+
+        try await deleteProfile(uid: user.uid)
+        try await user.delete()
+    }
+
+    static func markOwnerSubscriptionProvider(uid: String, productID: String) async throws {
+        let data: [String: Any] = [
+            "subscriptionProvider": "apple",
+            "ownerSubscriptionProductID": productID,
+            "subscriptionUpdatedAt": FieldValue.serverTimestamp()
+        ]
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            Firestore.firestore()
+                .collection("users")
+                .document(uid)
+                .setData(data, merge: true) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+        }
+    }
+
     private static func signInWithFirebase(email: String, password: String) async throws -> AuthDataResult {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AuthDataResult, Error>) in
             Auth.auth().signIn(withEmail: email, password: password) { result, error in
@@ -643,6 +779,21 @@ struct FirebaseAccountService {
                 .collection("users")
                 .document(profile.uid)
                 .setData(data, merge: true) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+        }
+    }
+
+    private static func deleteProfile(uid: String) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            Firestore.firestore()
+                .collection("users")
+                .document(uid)
+                .delete { error in
                     if let error {
                         continuation.resume(throwing: error)
                     } else {
@@ -701,6 +852,224 @@ func upsertLocalUserMirror(
     modelContext.insert(localUser)
     try? modelContext.save()
     return localUser
+}
+
+enum PianivoAccountRole {
+    case client
+    case employee
+    case owner
+}
+
+func cleanUpLocalAccountData(
+    role: PianivoAccountRole,
+    userName: String,
+    userId: UUID?,
+    businessCode: String,
+    in modelContext: ModelContext,
+    users: [User],
+    employees: [Employee],
+    appointments: [Appointment],
+    ownerClientMessages: [OwnerClientMessage],
+    employeeClientMessages: [EmployeeClientMessage],
+    reviews: [Review]
+) {
+    if let userId, let user = users.first(where: { $0.id == userId }) {
+        modelContext.delete(user)
+    } else {
+        users
+            .filter { $0.name == userName && roleMatches($0.role, role: role) }
+            .forEach { modelContext.delete($0) }
+    }
+
+    switch role {
+    case .client:
+        appointments
+            .filter { $0.customerName == userName }
+            .forEach { modelContext.delete($0) }
+        ownerClientMessages
+            .filter { $0.clientName == userName }
+            .forEach { modelContext.delete($0) }
+        employeeClientMessages
+            .filter { $0.clientName == userName }
+            .forEach { modelContext.delete($0) }
+        reviews
+            .filter { $0.reviewerName == userName }
+            .forEach { modelContext.delete($0) }
+    case .employee:
+        employees
+            .filter { $0.name == userName && (businessCode.isEmpty || $0.businessCode == businessCode) }
+            .forEach { modelContext.delete($0) }
+        appointments
+            .filter { $0.employeeName == userName && (businessCode.isEmpty || $0.businessCode == businessCode) }
+            .forEach { $0.employeeName = "Former Employee" }
+        employeeClientMessages
+            .filter { $0.employeeName == userName }
+            .forEach { modelContext.delete($0) }
+    case .owner:
+        break
+    }
+
+    try? modelContext.save()
+}
+
+private func roleMatches(_ userRole: String, role: PianivoAccountRole) -> Bool {
+    switch role {
+    case .client:
+        return userRole == "client"
+    case .employee:
+        return userRole == "staff"
+    case .owner:
+        return userRole == "owner"
+    }
+}
+
+// MARK: - SETTINGS & ACCOUNT MANAGEMENT
+
+struct AccountSettingsView: View {
+    let role: PianivoAccountRole
+    let displayName: String
+    let onAccountDeleted: () -> Void
+
+    var body: some View {
+        List {
+            Section {
+                NavigationLink {
+                    AccountManagementView(
+                        role: role,
+                        displayName: displayName,
+                        onAccountDeleted: onAccountDeleted
+                    )
+                } label: {
+                    Label("Account Management", systemImage: "person.crop.circle.badge.gearshape")
+                }
+            }
+        }
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+struct AccountManagementView: View {
+    let role: PianivoAccountRole
+    let displayName: String
+    let onAccountDeleted: () -> Void
+
+    @State private var password = ""
+    @State private var isDeleting = false
+    @State private var showDeleteConfirmation = false
+    @State private var showError = false
+    @State private var errorMessage = "We couldn't complete your account deletion. Please try again."
+    @State private var showManageSubscriptions = false
+
+    var body: some View {
+        List {
+            Section {
+                HStack(spacing: 12) {
+                    Image(systemName: "person.crop.circle.fill")
+                        .foregroundColor(.teal)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(displayName)
+                            .font(.subheadline.bold())
+                        Text(roleTitle)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            Section {
+                SecureField("Current Password", text: $password)
+                    .textContentType(.password)
+            } footer: {
+                Text("Enter your current password before permanently deleting this account.")
+            }
+
+            if role == .owner {
+                Section {
+                    Button {
+                        showManageSubscriptions = true
+                    } label: {
+                        Label("Manage Subscription", systemImage: "creditcard")
+                    }
+                } footer: {
+                    Text("Deleting your Pianivo account does not automatically cancel your App Store subscription.")
+                }
+            }
+
+            Section {
+                Button(role: .destructive) {
+                    showDeleteConfirmation = true
+                } label: {
+                    Label(isDeleting ? "Deleting Account..." : "Delete Account", systemImage: "trash")
+                }
+                .disabled(isDeleting || password.isEmpty)
+            }
+        }
+        .navigationTitle("Account Management")
+        .navigationBarTitleDisplayMode(.inline)
+        .manageSubscriptionsSheet(isPresented: $showManageSubscriptions)
+        .alert("Delete Account?", isPresented: $showDeleteConfirmation) {
+            if role == .owner {
+                Button("Manage Subscription") {
+                    showManageSubscriptions = true
+                }
+            }
+            Button("Delete Account", role: .destructive) {
+                Task { await deleteAccount() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(deleteWarning)
+        }
+        .alert("Unable to Delete Account", isPresented: $showError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(errorMessage)
+        }
+    }
+
+    private var roleTitle: String {
+        switch role {
+        case .client:
+            return "Client Account"
+        case .employee:
+            return "Employee Account"
+        case .owner:
+            return "Owner Account"
+        }
+    }
+
+    private var deleteWarning: String {
+        switch role {
+        case .client:
+            return "This will permanently delete your Pianivo account and associated personal data. This action cannot be undone."
+        case .employee:
+            return "This will permanently delete your Pianivo account and associated personal data. You will no longer have access to the business account associated with your employee profile. This action cannot be undone."
+        case .owner:
+            return """
+            This will permanently delete your Pianivo account and associated personal data.
+
+            Deleting your Pianivo account does not automatically cancel your App Store subscription. If you have an active subscription, Apple may continue billing you until the subscription is canceled.
+
+            You can manage or cancel your subscription through your Apple ID subscription settings.
+
+            This action cannot be undone.
+            """
+        }
+    }
+
+    private func deleteAccount() async {
+        isDeleting = true
+        do {
+            try await FirebaseAccountService.deleteCurrentAccount(password: password)
+            onAccountDeleted()
+        } catch {
+            print("Account deletion failed: \(error.localizedDescription)")
+            errorMessage = "We couldn't complete your account deletion. Please try again."
+            showError = true
+        }
+        isDeleting = false
+    }
 }
 
 // MARK: - MAIN ENTRY VIEW
@@ -893,6 +1262,7 @@ struct CreateAccountView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Query private var users: [User]
+    @StateObject private var ownerSubscriptionService = OwnerIAPSubscriptionService()
     
     @Binding var selectedRole: String?
     @Binding var userName: String
@@ -906,9 +1276,7 @@ struct CreateAccountView: View {
     @State private var selectedAccountType = "client"
     @State private var errorMessage: String?
     @State private var isCreatingAccount = false
-    @State private var ownerBusinessCode = ""
-    @State private var ownerCheckoutSessionID = ""
-    @Environment(\.openURL) private var openURL
+    @State private var isRestoringPurchase = false
     
     let accountTypes = [
         ("owner", "Studio Owner", "crown.fill", Color.teal),
@@ -951,11 +1319,21 @@ struct CreateAccountView: View {
                             AuthField(icon: "link", placeholder: "Employee Invite Token", text: $inviteToken, isSecure: false)
                         }
 
-                        if selectedAccountType == "owner", !ownerCheckoutSessionID.isEmpty {
-                            Text("After you complete Stripe Checkout, return here and tap the button again to finish creating your owner account.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .multilineTextAlignment(.center)
+                        if selectedAccountType == "owner" {
+                            VStack(spacing: 8) {
+                                Text(ownerSubscriptionService.hasActiveOwnerSubscription ? "Owner subscription active." : "Owner access requires an Apple subscription: \(ownerSubscriptionService.displayPrice)")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.center)
+
+                                Button {
+                                    Task { await restoreOwnerPurchase() }
+                                } label: {
+                                    Text(isRestoringPurchase ? "Restoring..." : "Restore Purchases")
+                                        .font(.caption.bold())
+                                }
+                                .disabled(isRestoringPurchase)
+                            }
                         }
                     }
                     .padding(.horizontal)
@@ -998,10 +1376,10 @@ struct CreateAccountView: View {
 
     private var primaryButtonTitle: String {
         if isCreatingAccount {
-            return selectedAccountType == "owner" ? "Checking Subscription..." : "Creating Account..."
+            return selectedAccountType == "owner" ? "Checking Apple Subscription..." : "Creating Account..."
         }
         if selectedAccountType == "owner" {
-            return ownerCheckoutSessionID.isEmpty ? "Subscribe with Stripe" : "I Completed Payment - Create Account"
+            return ownerSubscriptionService.hasActiveOwnerSubscription ? "Create Owner Account" : "Subscribe with Apple"
         }
         return "Create Account"
     }
@@ -1025,32 +1403,25 @@ struct CreateAccountView: View {
         
         if selectedAccountType == "owner" {
             staffInviteToken = ""
-            businessCode = ownerBusinessCode.isEmpty ? String(UUID().uuidString.prefix(8).uppercased()) : ownerBusinessCode
-            ownerBusinessCode = businessCode
-            if ownerCheckoutSessionID.isEmpty {
+            businessCode = String(UUID().uuidString.prefix(8).uppercased())
+            if !ownerSubscriptionService.hasActiveOwnerSubscription {
                 isCreatingAccount = true
                 errorMessage = nil
                 do {
-                    let checkout = try await OwnerSubscriptionService.createCheckout(name: cleanName, email: cleanEmail, businessCode: businessCode)
-                    ownerCheckoutSessionID = checkout.sessionID
-                    openURL(checkout.checkoutURL)
-                    errorMessage = "Complete your Stripe subscription, then return here to finish account creation."
+                    try await ownerSubscriptionService.purchaseOwnerSubscription()
+                    guard ownerSubscriptionService.hasActiveOwnerSubscription else {
+                        errorMessage = "Apple has not confirmed an active subscription yet. Please try again."
+                        isCreatingAccount = false
+                        return
+                    }
+                } catch OwnerIAPSubscriptionError.purchaseCancelled {
+                    isCreatingAccount = false
+                    return
                 } catch {
                     errorMessage = error.localizedDescription
-                }
-                isCreatingAccount = false
-                return
-            }
-
-            do {
-                let status = try await OwnerSubscriptionService.fetchStatus(sessionID: ownerCheckoutSessionID)
-                guard status.active else {
-                    errorMessage = "Your subscription is not active yet. Current Stripe status: \(status.status)."
+                    isCreatingAccount = false
                     return
                 }
-            } catch {
-                errorMessage = error.localizedDescription
-                return
             }
         } else if selectedAccountType == "staff" {
             let cleanInviteToken = inviteToken.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1086,6 +1457,13 @@ struct CreateAccountView: View {
                     role: selectedAccountType,
                     businessCode: businessCode
                 )
+
+                if selectedAccountType == "owner" {
+                    try await FirebaseAccountService.markOwnerSubscriptionProvider(
+                        uid: profile.uid,
+                        productID: OwnerSubscriptionProduct.monthly
+                    )
+                }
             }
             let newUser = upsertLocalUserMirror(profile: profile, in: modelContext, existingUsers: users)
 
@@ -1106,6 +1484,20 @@ struct CreateAccountView: View {
 
         isCreatingAccount = false
     }
+
+    private func restoreOwnerPurchase() async {
+        isRestoringPurchase = true
+        errorMessage = nil
+
+        do {
+            try await ownerSubscriptionService.restorePurchases()
+            errorMessage = ownerSubscriptionService.hasActiveOwnerSubscription ? nil : "No active owner subscription was found for this Apple ID."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+
+        isRestoringPurchase = false
+    }
 }
 
 // MARK: - ROOT & ROLE VIEWS
@@ -1117,6 +1509,11 @@ struct PianivoRootView: View {
     @Binding var selectedRole: String?
     @Environment(\.modelContext) private var modelContext
     @Query private var users: [User]
+    @Query private var employees: [Employee]
+    @Query private var appointments: [Appointment]
+    @Query private var ownerClientMessages: [OwnerClientMessage]
+    @Query private var employeeClientMessages: [EmployeeClientMessage]
+    @Query private var reviews: [Review]
     
     var loggedInUser: User? {
         guard let id = loggedInUserId else { return nil }
@@ -1129,20 +1526,44 @@ struct PianivoRootView: View {
                 OwnerDashboard(onLogout: {
                     FirebaseAccountService.signOut()
                     selectedRole = nil
+                }, onAccountDeleted: {
+                    handleAccountDeleted(role: .owner, businessCode: loggedInUser?.businessCode ?? "")
                 })
             } else if role == "staff" {
                 let businessCode = loggedInUser?.businessCode ?? ""
                 EmployeeDashboard(employeeName: userName, businessCode: businessCode, onLogout: {
                     FirebaseAccountService.signOut()
                     selectedRole = nil
+                }, onAccountDeleted: {
+                    handleAccountDeleted(role: .employee, businessCode: businessCode)
                 })
             } else {
                 ClientTabView(clientName: userName, onLogout: {
                     FirebaseAccountService.signOut()
                     selectedRole = nil
+                }, onAccountDeleted: {
+                    handleAccountDeleted(role: .client, businessCode: "")
                 })
             }
         }
+    }
+
+    private func handleAccountDeleted(role: PianivoAccountRole, businessCode: String) {
+        cleanUpLocalAccountData(
+            role: role,
+            userName: userName,
+            userId: loggedInUserId,
+            businessCode: businessCode,
+            in: modelContext,
+            users: users,
+            employees: employees,
+            appointments: appointments,
+            ownerClientMessages: ownerClientMessages,
+            employeeClientMessages: employeeClientMessages,
+            reviews: reviews
+        )
+        FirebaseAccountService.signOut()
+        selectedRole = nil
     }
 }
 

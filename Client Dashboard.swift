@@ -21,11 +21,13 @@ private func bizInitials(_ name: String) -> String {
 struct ClientTabView: View {
     let clientName: String
     var onLogout: (() -> Void)? = nil
+    var onAccountDeleted: (() -> Void)? = nil
     @Query private var allBusinesses: [BusinessProfile]
     
     @State private var activeView: ClientSection = .home
     @State private var isShowingSidePanel = false
     @State private var isShowingSupport = false
+    @State private var isShowingSettings = false
     
     enum ClientSection { case home, discover, schedule, insights }
     
@@ -78,6 +80,14 @@ struct ClientTabView: View {
                 accountType: "Client",
                 businessSupportEmail: businessSupportEmail
             )
+        }
+        .sheet(isPresented: $isShowingSettings) {
+            NavigationStack {
+                AccountSettingsView(role: .client, displayName: clientName) {
+                    isShowingSettings = false
+                    onAccountDeleted?()
+                }
+            }
         }
     }
 
@@ -135,6 +145,20 @@ struct ClientTabView: View {
                         HStack(spacing: 15) {
                             Image(systemName: "plus.circle.fill").foregroundColor(.teal).frame(width: 24)
                             Text("Book Appointment").font(.subheadline.bold()).foregroundColor(.primary)
+                            Spacer()
+                        }
+                        .padding(.vertical, 12).padding(.horizontal, 10)
+                        .background(Color.teal.opacity(0.08))
+                        .cornerRadius(10)
+                    }
+
+                    Button {
+                        withAnimation(.spring()) { isShowingSidePanel = false }
+                        isShowingSettings = true
+                    } label: {
+                        HStack(spacing: 15) {
+                            Image(systemName: "gearshape.fill").foregroundColor(.teal).frame(width: 24)
+                            Text("Settings").font(.subheadline.bold()).foregroundColor(.primary)
                             Spacer()
                         }
                         .padding(.vertical, 12).padding(.horizontal, 10)

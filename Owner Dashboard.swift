@@ -13,6 +13,7 @@ enum CalendarScope: String, CaseIterable { case day = "Day", week = "Week", mont
 struct OwnerDashboard: View {
     @Environment(\.modelContext) private var modelContext
     var onLogout: (() -> Void)? = nil
+    var onAccountDeleted: (() -> Void)? = nil
     
     @Query(sort: \Appointment.startTime) private var allAppointments: [Appointment]
     @Query private var loggedInUsers: [User]
@@ -31,6 +32,7 @@ struct OwnerDashboard: View {
     @State private var isShowingEmployeeManager = false
     @State private var isShowingBusinessProfile = false
     @State private var isShowingSupport = false
+    @State private var isShowingSettings = false
     
     // Revenue Toggle State
     @State private var revenuePeriod: RevenuePeriod = .day
@@ -151,6 +153,14 @@ struct OwnerDashboard: View {
                         accountType: "Owner",
                         businessSupportEmail: businessSupportEmail
                     )
+                }
+                .sheet(isPresented: $isShowingSettings) {
+                    NavigationStack {
+                        AccountSettingsView(role: .owner, displayName: loggedInUsers.first?.name ?? "Owner") {
+                            isShowingSettings = false
+                            onAccountDeleted?()
+                        }
+                    }
                 }
                 .sheet(item: $revenueReportFile) { file in
                     RevenueReportShareSheet(url: file.url)
@@ -751,6 +761,14 @@ struct OwnerDashboard: View {
 
                     VStack(alignment: .leading, spacing: 10) {
                         Text("PREFERENCES").font(.caption.bold()).foregroundColor(.secondary)
+                        Button {
+                            isShowingSettings = true
+                            withAnimation { isShowingSidePanel = false }
+                        } label: {
+                            Label("Settings", systemImage: "gearshape.fill")
+                                .font(.subheadline)
+                                .foregroundColor(.primary)
+                        }
                         Button {
                             isShowingSupport = true
                             withAnimation { isShowingSidePanel = false }

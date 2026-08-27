@@ -11,6 +11,7 @@ struct EmployeeDashboard: View {
     let employeeName: String
     var businessCode: String = ""
     var onLogout: (() -> Void)?
+    var onAccountDeleted: (() -> Void)?
     
     @State private var calendarScope: RevenuePeriod = .day
     @State private var selectedDate = Date()
@@ -18,6 +19,7 @@ struct EmployeeDashboard: View {
     @State private var isShowingAddAppointment = false
     @State private var isShowingMessages = false
     @State private var isShowingSupport = false
+    @State private var isShowingSettings = false
     @State private var selectedApptForEdit: Appointment? = nil
     @State private var viewMode: DashboardViewMode = .calendar
     
@@ -131,6 +133,14 @@ struct EmployeeDashboard: View {
                 accountType: "Employee",
                 businessSupportEmail: businessSupportEmail
             )
+        }
+        .sheet(isPresented: $isShowingSettings) {
+            NavigationStack {
+                AccountSettingsView(role: .employee, displayName: employeeName) {
+                    isShowingSettings = false
+                    onAccountDeleted?()
+                }
+            }
         }
     }
     
@@ -342,6 +352,15 @@ struct EmployeeDashboard: View {
                         color: .orange
                     ) {
                         isShowingAddAppointment = true
+                        withAnimation { isShowingSidePanel = false }
+                    }
+
+                    sidePanelNavButton(
+                        label: "Settings",
+                        icon: "gearshape.fill",
+                        color: .teal
+                    ) {
+                        isShowingSettings = true
                         withAnimation { isShowingSidePanel = false }
                     }
 
