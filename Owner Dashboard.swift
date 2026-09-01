@@ -12,6 +12,7 @@ enum CalendarScope: String, CaseIterable { case day = "Day", week = "Week", mont
 
 struct OwnerDashboard: View {
     @Environment(\.modelContext) private var modelContext
+    let businessCode: String
     var onLogout: (() -> Void)? = nil
     var onAccountDeleted: (() -> Void)? = nil
     
@@ -49,9 +50,12 @@ struct OwnerDashboard: View {
     
     let hours = Array(0...23)
     
-    /// The owner's business code from their profile
+    /// The owner's business code from their authenticated profile.
     private var ownerBusinessCode: String {
-        profiles.first?.businessCode ?? ""
+        if !businessCode.isEmpty {
+            return businessCode
+        }
+        return profiles.first?.businessCode ?? ""
     }
     
     var filteredAppointments: [Appointment] {
@@ -146,7 +150,7 @@ struct OwnerDashboard: View {
                 }
                 .sheet(isPresented: $isShowingServiceManager) { ServiceManagerSheet(businessCode: ownerBusinessCode) }
                 .sheet(isPresented: $isShowingEmployeeManager) { EmployeeManagerSheet(businessCode: ownerBusinessCode) }
-                .sheet(isPresented: $isShowingBusinessProfile) { BusinessProfileSheet() }
+                .sheet(isPresented: $isShowingBusinessProfile) { BusinessProfileSheet(businessCode: ownerBusinessCode) }
                 .sheet(isPresented: $isShowingSupport) {
                     SupportReportSheet(
                         accountName: loggedInUsers.first?.name ?? "Owner",
@@ -1359,9 +1363,15 @@ struct ServiceManagerSheet: View {
                             Stepper("\(durationMinutes) min", value: $durationMinutes, in: 15...240, step: 15)
                         }
                         
-                        Picker("Category", selection: $category) {
-                            Text("General").tag("")
-                            ForEach(categoryOptions, id: \.self) { Text($0).tag($0) }
+                        HStack {
+                            Text("Category")
+                            Spacer()
+                            Picker("Category", selection: $category) {
+                                Text("General").tag("")
+                                ForEach(categoryOptions, id: \.self) { Text($0).tag($0) }
+                            }
+                            .pickerStyle(.menu)
+                            .labelsHidden()
                         }
                         
                         HStack {
@@ -1448,6 +1458,11 @@ struct EmployeeManagerSheet: View {
     @Query private var profiles: [BusinessProfile]
     
     @State private var newEmployeeName = ""
+    @State private var newEmployeeEmail = ""
+    @State private var generatedInviteToken = ""
+    @State private var generatedInviteEmail = ""
+    @State private var generatedInviteError: String?
+    @State private var isGeneratingInvite = false
     @State private var isShowingInviteSheet = false
     
     /// Studio name from profile
@@ -1469,7 +1484,7 @@ struct EmployeeManagerSheet: View {
                             Text(businessCode)
                                 .font(.system(size: 28, weight: .bold, design: .monospaced))
                                 .foregroundColor(.teal)
-                            Text("Use email invites to create employee app logins. Manual staff rows only add schedule names.")
+                            Text("Add staff with an email to generate an employee signup invite token for this business.")
                                 .font(.caption).foregroundColor(.secondary)
                             
                             Button {
@@ -1501,12 +1516,56 @@ struct EmployeeManagerSheet: View {
                 }
                 
                 Section("Add Staff Manually") {
-                    HStack {
+                    VStack(spacing: 10) {
                         TextField("Employee Name", text: $newEmployeeName)
-                        Button(action: addEmployee) {
-                            Image(systemName: "plus.circle.fill").foregroundColor(.teal).font(.title3)
+                            .textInputAutocapitalization(.words)
+                        TextField("Employee Email", text: $newEmployeeEmail)
+                            .keyboardType(.emailAddress)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+
+                        Button {
+                            Task { await addEmployeeAndGenerateInvite() }
+                        } label: {
+                            HStack {
+                                Image(systemName: "person.badge.plus")
+                                Text(isGeneratingInvite ? "Generating Invite..." : "Add Employee & Generate Invite")
+                                    .fontWeight(.semibold)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(canAddEmployee ? Color.teal : Color.gray.opacity(0.4))
+                            .foregroundColor(.white)
+                            .cornerRadius(10)
                         }
-                        .disabled(newEmployeeName.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(!canAddEmployee || isGeneratingInvite)
+                    }
+
+                    if !generatedInviteToken.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label("Invite Token Generated", systemImage: "checkmark.circle.fill")
+                                .font(.caption.bold())
+                                .foregroundColor(.green)
+                            Text(generatedInviteEmail)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text(generatedInviteToken)
+                                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                .textSelection(.enabled)
+                            Button {
+                                UIPasteboard.general.string = makeInviteDeepLink(inviteToken: generatedInviteToken, businessName: studioName)
+                            } label: {
+                                Label("Copy Invite Link", systemImage: "doc.on.doc")
+                                    .font(.caption.bold())
+                            }
+                            .foregroundColor(.teal)
+                        }
+                    }
+
+                    if let generatedInviteError {
+                        Text(generatedInviteError)
+                            .font(.caption)
+                            .foregroundColor(.red)
                     }
                 }
                 
@@ -1528,7 +1587,7 @@ struct EmployeeManagerSheet: View {
                                 }
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(employee.name).font(.body)
-                                    Text("Joined \(employee.joinDate.formatted(date: .abbreviated, time: .omitted))")
+                                    Text(employee.email.isEmpty ? "Joined \(employee.joinDate.formatted(date: .abbreviated, time: .omitted))" : employee.email)
                                         .font(.caption2).foregroundColor(.secondary)
                                 }
                             }
@@ -1548,11 +1607,43 @@ struct EmployeeManagerSheet: View {
         }
     }
     
-    private func addEmployee() {
-        let employee = Employee(name: newEmployeeName, businessCode: businessCode)
-        modelContext.insert(employee)
-        newEmployeeName = ""
-        try? modelContext.save()
+    private var canAddEmployee: Bool {
+        !newEmployeeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        newEmployeeEmail.trimmingCharacters(in: .whitespacesAndNewlines).contains("@") &&
+        !businessCode.isEmpty
+    }
+
+    private func addEmployeeAndGenerateInvite() async {
+        let cleanName = newEmployeeName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanEmail = newEmployeeEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        guard !businessCode.isEmpty else {
+            generatedInviteError = "Save your business profile before adding staff."
+            return
+        }
+        guard !cleanName.isEmpty, cleanEmail.contains("@") else {
+            generatedInviteError = "Enter the employee name and email address."
+            return
+        }
+
+        isGeneratingInvite = true
+        generatedInviteError = nil
+
+        do {
+            let token = try await StaffInviteService.createInvite(email: cleanEmail, businessCode: businessCode, studioName: studioName)
+            let employee = Employee(name: cleanName, email: cleanEmail, businessCode: businessCode)
+            modelContext.insert(employee)
+            try modelContext.save()
+
+            generatedInviteToken = token
+            generatedInviteEmail = cleanEmail
+            newEmployeeName = ""
+            newEmployeeEmail = ""
+        } catch {
+            generatedInviteError = error.localizedDescription
+        }
+
+        isGeneratingInvite = false
     }
     
     private func deleteEmployees(at offsets: IndexSet) {
@@ -1786,6 +1877,8 @@ struct BusinessProfileSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Query private var profiles: [BusinessProfile]
+
+    let businessCode: String
     
     @State private var studioName = ""
     @State private var address = ""
@@ -1807,7 +1900,12 @@ struct BusinessProfileSheet: View {
     @State private var saved = false
     
     private let categoryOptions = ["Wellness", "Music", "Beauty", "Fitness", "Healthcare", "Education", "Other"]
-    private var existingProfile: BusinessProfile? { profiles.first }
+    private var existingProfile: BusinessProfile? {
+        if !businessCode.isEmpty {
+            return profiles.first { $0.businessCode == businessCode }
+        }
+        return profiles.first
+    }
     
     var body: some View {
         NavigationStack {
@@ -1898,10 +1996,7 @@ struct BusinessProfileSheet: View {
             profile = existing
         } else {
             profile = BusinessProfile()
-            // Generate business code if new profile
-            if profile.businessCode.isEmpty {
-                profile.businessCode = String(UUID().uuidString.prefix(8).uppercased())
-            }
+            profile.businessCode = businessCode.isEmpty ? String(UUID().uuidString.prefix(8).uppercased()) : businessCode
             modelContext.insert(profile)
         }
         profile.studioName = studioName; profile.address = address; profile.city = city; profile.state = state

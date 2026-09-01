@@ -117,6 +117,11 @@ enum RevenuePeriod: String, CaseIterable, Identifiable {
     var id: String { self.rawValue }
 }
 
+enum PianivoLegalLinks {
+    static let privacyPolicy = URL(string: "https://pianivo-mindful-scheduling.onrender.com/privacy/")!
+    static let termsOfUse = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
+}
+
 // MARK: - MODELS
 
 @Model
@@ -171,12 +176,14 @@ final class Service: Identifiable {
 final class Employee: Identifiable {
     var id: UUID = UUID()
     var name: String
+    var email: String = ""
     var joinDate: Date = Date()
     /// Links this employee to a specific business (matches BusinessProfile.businessCode)
     var businessCode: String = ""
     
-    init(name: String, businessCode: String = "") {
+    init(name: String, email: String = "", businessCode: String = "") {
         self.name = name
+        self.email = email
         self.businessCode = businessCode
     }
 }
@@ -485,6 +492,10 @@ final class OwnerIAPSubscriptionService: ObservableObject {
         }
 
         let result = try await product.purchase()
+        try await processPurchaseResult(result)
+    }
+
+    func processPurchaseResult(_ result: Product.PurchaseResult) async throws {
         switch result {
         case .success(.verified(let transaction)):
             try await handleVerified(transaction)
@@ -1321,10 +1332,17 @@ struct CreateAccountView: View {
 
                         if selectedAccountType == "owner" {
                             VStack(spacing: 8) {
-                                Text(ownerSubscriptionService.hasActiveOwnerSubscription ? "Owner subscription active." : "Owner access requires an Apple subscription: \(ownerSubscriptionService.displayPrice)")
+                                Text(ownerSubscriptionService.hasActiveOwnerSubscription ? "Owner subscription active." : "Owner access requires an active Pianivo Owner subscription.")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                                     .multilineTextAlignment(.center)
+
+                                if !ownerSubscriptionService.hasActiveOwnerSubscription {
+                                    OwnerSubscriptionStoreView()
+                                        .onInAppPurchaseCompletion { product, result in
+                                            await handleOwnerSubscriptionCompletion(product: product, result: result)
+                                        }
+                                }
 
                                 Button {
                                     Task { await restoreOwnerPurchase() }
@@ -1342,21 +1360,27 @@ struct CreateAccountView: View {
                         Text(error).foregroundColor(.red).font(.caption)
                     }
                     
-                    Button {
-                        Task { await createAccount() }
-                    } label: {
-                        Text(primaryButtonTitle)
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 16)
-                            .background(Color.teal)
-                            .foregroundColor(.white)
-                            .cornerRadius(16)
+                    if selectedAccountType != "owner" || ownerSubscriptionService.hasActiveOwnerSubscription {
+                        Button {
+                            Task { await createAccount() }
+                        } label: {
+                            Text(primaryButtonTitle)
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 16)
+                                .background(Color.teal)
+                                .foregroundColor(.white)
+                                .cornerRadius(16)
+                        }
+                        .padding(.horizontal)
                     }
-                    .padding(.horizontal)
-                    .padding(.bottom, 40)
                 }
+                .frame(maxWidth: 560)
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 80)
             }
+            .scrollIndicators(.visible)
+            .scrollDismissesKeyboard(.interactively)
             .disabled(isCreatingAccount)
             .navigationTitle("Sign Up")
             .navigationBarTitleDisplayMode(.inline)
@@ -1379,9 +1403,36 @@ struct CreateAccountView: View {
             return selectedAccountType == "owner" ? "Checking Apple Subscription..." : "Creating Account..."
         }
         if selectedAccountType == "owner" {
-            return ownerSubscriptionService.hasActiveOwnerSubscription ? "Create Owner Account" : "Subscribe with Apple"
+            return ownerSubscriptionService.hasActiveOwnerSubscription ? "Create Owner Account" : "Start Owner Subscription"
         }
         return "Create Account"
+    }
+
+    private func handleOwnerSubscriptionCompletion(product: Product, result: Result<Product.PurchaseResult, any Error>) async {
+        guard product.id == OwnerSubscriptionProduct.monthly else {
+            return
+        }
+
+        isCreatingAccount = true
+        errorMessage = nil
+
+        do {
+            let purchaseResult = try result.get()
+            try await ownerSubscriptionService.processPurchaseResult(purchaseResult)
+            guard ownerSubscriptionService.hasActiveOwnerSubscription else {
+                errorMessage = "Apple has not confirmed an active subscription yet. Please try again."
+                isCreatingAccount = false
+                return
+            }
+
+            isCreatingAccount = false
+            await createAccount()
+        } catch OwnerIAPSubscriptionError.purchaseCancelled {
+            isCreatingAccount = false
+        } catch {
+            errorMessage = error.localizedDescription
+            isCreatingAccount = false
+        }
     }
     
     private func createAccount() async {
@@ -1390,11 +1441,6 @@ struct CreateAccountView: View {
 
         guard !cleanName.isEmpty, !cleanEmail.isEmpty, !password.isEmpty else {
             errorMessage = "Please fill in all fields."
-            return
-        }
-
-        guard !users.contains(where: { $0.email.lowercased() == cleanEmail }) else {
-            errorMessage = "An account with this email already exists."
             return
         }
 
@@ -1523,11 +1569,12 @@ struct PianivoRootView: View {
     var body: some View {
         Group {
             if role == "owner" {
-                OwnerDashboard(onLogout: {
+                let businessCode = loggedInUser?.businessCode ?? ""
+                OwnerDashboard(businessCode: businessCode, onLogout: {
                     FirebaseAccountService.signOut()
                     selectedRole = nil
                 }, onAccountDeleted: {
-                    handleAccountDeleted(role: .owner, businessCode: loggedInUser?.businessCode ?? "")
+                    handleAccountDeleted(role: .owner, businessCode: businessCode)
                 })
             } else if role == "staff" {
                 let businessCode = loggedInUser?.businessCode ?? ""
@@ -1649,6 +1696,45 @@ struct AccountTypeCard: View {
         }
         .buttonStyle(.plain)
         .animation(.spring(response: 0.3), value: isSelected)
+    }
+}
+
+struct OwnerSubscriptionStoreView: View {
+    var body: some View {
+        SubscriptionStoreView(productIDs: OwnerSubscriptionProduct.allIDs) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Pianivo Owner Monthly")
+                    .font(.headline)
+                    .foregroundColor(.primary)
+
+                Text("Monthly auto-renewable access to Owner tools for business scheduling, staff management, services, appointments, and revenue tracking.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 12) {
+                    Link("Terms of Use (EULA)", destination: PianivoLegalLinks.termsOfUse)
+                    Link("Privacy Policy", destination: PianivoLegalLinks.privacyPolicy)
+                }
+                .font(.caption.bold())
+                .foregroundColor(.teal)
+
+                Text("Subscriptions renew automatically until canceled in Apple ID subscription settings.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .productDescription(.visible)
+        .tint(.teal)
+        .padding(12)
+        .frame(maxWidth: .infinity)
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.teal.opacity(0.18), lineWidth: 1)
+        )
     }
 }
 
