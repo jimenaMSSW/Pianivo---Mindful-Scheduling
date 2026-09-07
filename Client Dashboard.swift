@@ -1377,8 +1377,7 @@ struct ClientBookingSheet: View {
     private var hasSchedulingConflict: Bool {
         allAppointments.contains { appointment in
             guard appointment.businessCode == business.businessCode,
-                  appointment.status != .cancelled,
-                  appointment.status != .noShow,
+                  (appointment.status == .confirmed || appointment.status == .completed || appointment.paidAmountCents > 0),
                   appointment.startTime < appointmentEndDate,
                   appointment.endTime > appointmentDate else {
                 return false

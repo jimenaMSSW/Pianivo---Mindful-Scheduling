@@ -8,6 +8,7 @@ from django.views.decorators.csrf import csrf_exempt, csrf_protect
 from django.views.decorators.http import require_GET, require_POST
 from django.contrib.auth.decorators import login_required
 from django.utils import timezone
+from django.db.models import Q
 from django.core.serializers.json import DjangoJSONEncoder
 from django.core.exceptions import PermissionDenied, ImproperlyConfigured
 from django_ratelimit.decorators import ratelimit
@@ -130,14 +131,18 @@ def employee_has_conflict(employee, start_time, end_time):
         employee=employee,
         start_time__lt=end_time,
         end_time__gt=start_time,
-    ).exclude(status__in=["cancelled", "rejected", "no_show"]).exists()
+    ).filter(
+        Q(status__in=["confirmed", "completed"]) | Q(payments__status="succeeded")
+    ).distinct().exists()
 
 def business_has_conflict(business, start_time, end_time):
     return Appointment.objects.filter(
         business=business,
         start_time__lt=end_time,
         end_time__gt=start_time,
-    ).exclude(status__in=["cancelled", "rejected", "no_show"]).exists()
+    ).filter(
+        Q(status__in=["confirmed", "completed"]) | Q(payments__status="succeeded")
+    ).distinct().exists()
 
 def employee_earnings_amount(business, employee, payment_amount):
     if employee is None:
