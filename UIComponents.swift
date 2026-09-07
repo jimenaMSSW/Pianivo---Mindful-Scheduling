@@ -1,10 +1,117 @@
 import SwiftUI
+import SwiftData
 #if canImport(UIKit)
 import UIKit
 #endif
 #if canImport(MessageUI)
 import MessageUI
 #endif
+
+struct NotificationCenterListView: View {
+    let audience: String
+    let recipientName: String
+    let businessCode: String
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \AppNotification.createdAt, order: .reverse) private var notifications: [AppNotification]
+
+    private var filteredNotifications: [AppNotification] {
+        notifications.filter { item in
+            if item.audience == "all" { return true }
+            if !businessCode.isEmpty, item.businessCode == businessCode {
+                return item.audience == audience || item.audience == "business"
+            }
+            return item.audience == audience && (item.recipientName.isEmpty || item.recipientName == recipientName)
+        }
+    }
+
+    var body: some View {
+        List {
+            if filteredNotifications.isEmpty {
+                ContentUnavailableView("No Notifications", systemImage: "bell.slash", description: Text("Booking, payment, refund, schedule, and waitlist updates will appear here."))
+            } else {
+                ForEach(filteredNotifications) { item in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(item.title)
+                                .font(.subheadline.bold())
+                            Spacer()
+                            Text(item.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        Text(item.message)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                    .swipeActions {
+                        Button(item.isRead ? "Unread" : "Read") {
+                            item.isRead.toggle()
+                            try? modelContext.save()
+                        }
+                        .tint(.teal)
+                    }
+                }
+            }
+        }
+        .navigationTitle("Notifications")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+struct WaitlistManagerView: View {
+    let businessCode: String
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \WaitlistEntry.preferredStartTime, order: .forward) private var entries: [WaitlistEntry]
+
+    private var filteredEntries: [WaitlistEntry] {
+        businessCode.isEmpty ? entries : entries.filter { $0.businessCode == businessCode }
+    }
+
+    var body: some View {
+        List {
+            if filteredEntries.isEmpty {
+                ContentUnavailableView("No Waitlist Requests", systemImage: "person.badge.clock", description: Text("Client waitlist requests will appear here when a selected time is unavailable."))
+            } else {
+                ForEach(filteredEntries) { entry in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(entry.clientName)
+                                .font(.subheadline.bold())
+                            Spacer()
+                            Text(entry.status)
+                                .font(.caption.bold())
+                                .foregroundColor(.teal)
+                        }
+                        Text("\(entry.serviceName) • \(entry.preferredStartTime.formatted(date: .abbreviated, time: .shortened))")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        if !entry.clientEmail.isEmpty {
+                            Label(entry.clientEmail, systemImage: "envelope")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                    .swipeActions {
+                        Button("Contacted") {
+                            entry.status = "Contacted"
+                            try? modelContext.save()
+                        }
+                        .tint(.teal)
+
+                        Button("Remove", role: .destructive) {
+                            modelContext.delete(entry)
+                            try? modelContext.save()
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Waitlist")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
 
 struct SupportReportSheet: View {
     let accountName: String
@@ -252,6 +359,13 @@ struct AppointmentCard: View {
                         .foregroundColor(.teal)
                         .padding(.top, 2)
                 }
+
+                ForEach(Array(AppointmentPaymentSummary.paymentLines(for: appt).enumerated()), id: \.offset) { _, line in
+                    Text(line)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
             }
             
             Spacer()
@@ -270,12 +384,12 @@ struct AppointmentCard: View {
                     Color.clear.frame(height: 12)
                 }
                 
-                Text(appt.status == .completed ? "PAID" : "PENDING")
+                Text(appt.status.rawValue.uppercased())
                     .font(.system(size: 10, weight: .bold, design: .rounded))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(appt.status == .completed ? Color.teal.opacity(0.1) : Color.orange.opacity(0.1))
-                    .foregroundColor(appt.status == .completed ? .teal : .orange)
+                    .background(statusColor.opacity(0.1))
+                    .foregroundColor(statusColor)
                     .clipShape(Capsule())
             }
             .frame(minWidth: 60) // Ensure the badge area has consistent width
@@ -290,6 +404,16 @@ struct AppointmentCard: View {
                 .stroke(appt.isHighStress ? Color.orange.opacity(0.3) : Color.clear, lineWidth: 1)
         )
         .contentShape(Rectangle()) // Makes the whole card tappable, not just the text
+    }
+
+    private var statusColor: Color {
+        switch appt.status {
+        case .confirmed: return .teal
+        case .completed: return .green
+        case .cancelled: return .gray
+        case .noShow: return .red
+        case .pending: return .orange
+        }
     }
 }
 

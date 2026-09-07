@@ -1,9 +1,22 @@
 import SwiftUI
 import WebKit
 
+struct HostedBookingResult {
+    let appointmentID: Int
+    let paymentIntentID: String
+    let serviceName: String
+    let customerName: String
+    let customerEmail: String
+    let startTime: Date
+    let endTime: Date
+    let amountCents: Int
+    let depositAmountCents: Int
+}
+
 struct HostedBookingView: View {
     let title: String
     let url: URL
+    var onBookingCompleted: ((HostedBookingResult) -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
@@ -18,7 +31,12 @@ struct HostedBookingView: View {
                     url: url,
                     isLoading: $isLoading,
                     loadError: $loadError,
-                    onClose: { dismiss() }
+                    onClose: { result in
+                        if let result {
+                            onBookingCompleted?(result)
+                        }
+                        dismiss()
+                    }
                 )
                     .id(reloadID)
                     .ignoresSafeArea(edges: .bottom)
@@ -121,7 +139,7 @@ private struct WebPageView: UIViewRepresentable {
     let url: URL
     @Binding var isLoading: Bool
     @Binding var loadError: String?
-    let onClose: () -> Void
+    let onClose: (HostedBookingResult?) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(isLoading: $isLoading, loadError: $loadError, onClose: onClose)
@@ -145,9 +163,9 @@ private struct WebPageView: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate {
         @Binding private var isLoading: Bool
         @Binding private var loadError: String?
-        private let onClose: () -> Void
+        private let onClose: (HostedBookingResult?) -> Void
 
-        init(isLoading: Binding<Bool>, loadError: Binding<String?>, onClose: @escaping () -> Void) {
+        init(isLoading: Binding<Bool>, loadError: Binding<String?>, onClose: @escaping (HostedBookingResult?) -> Void) {
             _isLoading = isLoading
             _loadError = loadError
             self.onClose = onClose
@@ -157,7 +175,7 @@ private struct WebPageView: UIViewRepresentable {
             if let url = navigationAction.request.url,
                url.scheme == "pianivo",
                url.host == "close-booking" {
-                onClose()
+                onClose(Self.bookingResult(from: url))
                 decisionHandler(.cancel)
                 return
             }
@@ -185,6 +203,38 @@ private struct WebPageView: UIViewRepresentable {
         private func show(_ error: Error) {
             isLoading = false
             loadError = error.localizedDescription
+        }
+
+        private static func bookingResult(from url: URL) -> HostedBookingResult? {
+            guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+                return nil
+            }
+
+            func value(_ name: String) -> String {
+                components.queryItems?.first(where: { $0.name == name })?.value ?? ""
+            }
+
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            guard
+                let appointmentID = Int(value("appointment_id")),
+                let startTime = formatter.date(from: value("start_time")),
+                let endTime = formatter.date(from: value("end_time"))
+            else {
+                return nil
+            }
+
+            return HostedBookingResult(
+                appointmentID: appointmentID,
+                paymentIntentID: value("payment_intent_id"),
+                serviceName: value("service_name"),
+                customerName: value("customer_name"),
+                customerEmail: value("customer_email"),
+                startTime: startTime,
+                endTime: endTime,
+                amountCents: Int(value("amount")) ?? 0,
+                depositAmountCents: Int(value("deposit_amount")) ?? 0
+            )
         }
     }
 }

@@ -18,6 +18,9 @@ class Business(models.Model):
     timezone = models.CharField(max_length=50, default="UTC")
     created_at = models.DateTimeField(auto_now_add=True)
     employees_can_manage_appointments = models.BooleanField(default=True)
+    requires_deposit = models.BooleanField(default=False)
+    deposit_percentage = models.PositiveSmallIntegerField(default=0, help_text="Deposit percentage from 0 to 100.")
+    employees_keep_own_client_profits = models.BooleanField(default=False)
 
     class Meta:
         verbose_name_plural = "Businesses"
@@ -37,6 +40,7 @@ class Employee(models.Model):
         related_name="employees"
     )
     color = models.CharField(max_length=7, default="#3498db")
+    commission_percentage = models.PositiveSmallIntegerField(default=0, help_text="Employee commission percentage from 0 to 100.")
 
     def __str__(self):
         return f"{self.user.username} ({self.business.name})"
@@ -61,11 +65,15 @@ class Appointment(models.Model):
     STATUS_CHOICES = [
         ("pending", "Pending"),
         ("confirmed", "Confirmed"),
+        ("completed", "Completed"),
         ("cancelled", "Cancelled"),
+        ("no_show", "No-show"),
         ("rejected", "Rejected"),
     ]
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
     confirmed_at = models.DateTimeField(null=True, blank=True)
+    payout_status = models.CharField(max_length=30, default="unpaid")
+    employee_earnings_amount = models.PositiveIntegerField(default=0, help_text="Employee earnings in cents.")
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -135,6 +143,13 @@ class Payment(models.Model):
     customer_name = models.CharField(max_length=100)
     customer_email = models.EmailField(blank=True, null=True)
     amount = models.PositiveIntegerField(help_text="Smallest currency unit, such as cents.")
+    service_total_amount = models.PositiveIntegerField(default=0, help_text="Full service amount in cents.")
+    deposit_amount = models.PositiveIntegerField(default=0, help_text="Deposit amount charged in cents.")
+    refunded_amount = models.PositiveIntegerField(default=0, help_text="Amount refunded in cents.")
+    retained_deposit_amount = models.PositiveIntegerField(default=0, help_text="Deposit retained after late cancellation in cents.")
+    refund_status = models.CharField(max_length=30, default="not_refunded")
+    payout_status = models.CharField(max_length=30, default="unpaid")
+    employee_earnings_amount = models.PositiveIntegerField(default=0, help_text="Employee earnings in cents.")
     currency = models.CharField(max_length=3, default="usd")
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default="created")
     payment_method = models.CharField(max_length=30, choices=METHOD_CHOICES, default="unknown")
@@ -149,6 +164,51 @@ class Payment(models.Model):
 
     def __str__(self):
         return f"{self.customer_name} {self.amount} {self.currency.upper()} ({self.status})"
+
+class AppNotification(models.Model):
+    AUDIENCE_CHOICES = [
+        ("client", "Client"),
+        ("employee", "Employee"),
+        ("owner", "Owner"),
+        ("business", "Business"),
+        ("all", "All"),
+    ]
+
+    audience = models.CharField(max_length=20, choices=AUDIENCE_CHOICES)
+    recipient_name = models.CharField(max_length=100, blank=True)
+    business = models.ForeignKey(Business, on_delete=models.CASCADE, related_name="notifications", null=True, blank=True)
+    title = models.CharField(max_length=120)
+    message = models.TextField()
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.title} ({self.audience})"
+
+class WaitlistEntry(models.Model):
+    STATUS_CHOICES = [
+        ("waiting", "Waiting"),
+        ("contacted", "Contacted"),
+        ("booked", "Booked"),
+        ("removed", "Removed"),
+    ]
+
+    business = models.ForeignKey(Business, on_delete=models.CASCADE, related_name="waitlist_entries")
+    customer_name = models.CharField(max_length=100)
+    customer_email = models.EmailField(blank=True, null=True)
+    service_name = models.CharField(max_length=120)
+    preferred_start_time = models.DateTimeField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="waiting")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["preferred_start_time"]
+
+    def __str__(self):
+        return f"{self.customer_name} waiting for {self.service_name}"
 
 class OwnerSubscription(models.Model):
     email = models.EmailField(db_index=True)

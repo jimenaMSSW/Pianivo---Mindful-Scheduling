@@ -1,8 +1,243 @@
 import SwiftUI
 import SwiftData
+import Foundation
+import EventKit
+import UserNotifications
 #if canImport(MessageUI)
 import MessageUI
 #endif
+
+enum AppointmentPaymentCancellationError: LocalizedError {
+    case invalidResponse
+    case serverMessage(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidResponse:
+            return "The server returned an unexpected payment cancellation response."
+        case .serverMessage(let message):
+            return message
+        }
+    }
+}
+
+struct AppointmentPaymentCancellationResult: Decodable {
+    let appointmentStatus: String
+    let paymentStatus: String
+    let refundStatus: String
+    let refundedAmount: Int
+    let retainedDepositAmount: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case appointmentStatus = "appointment_status"
+        case paymentStatus = "payment_status"
+        case refundStatus = "refund_status"
+        case refundedAmount = "refunded_amount"
+        case retainedDepositAmount = "retained_deposit_amount"
+    }
+}
+
+struct AppointmentPaymentCancellationService {
+    static func cancelBackendAppointment(appointmentID: Int, paymentIntentID: String, customerEmail: String) async throws -> AppointmentPaymentCancellationResult {
+        let url = URL(string: "appointments/\(appointmentID)/cancel/", relativeTo: APIConfig.baseURL)!.absoluteURL
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "payment_intent_id": paymentIntentID,
+            "customer_email": customerEmail
+        ])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AppointmentPaymentCancellationError.invalidResponse
+        }
+
+        if !(200..<300).contains(httpResponse.statusCode) {
+            if let payload = try? JSONDecoder().decode([String: String].self, from: data),
+               let error = payload["error"] {
+                throw AppointmentPaymentCancellationError.serverMessage(error)
+            }
+            throw AppointmentPaymentCancellationError.invalidResponse
+        }
+
+        return try JSONDecoder().decode(AppointmentPaymentCancellationResult.self, from: data)
+    }
+}
+
+struct AppointmentPaymentSummary {
+    static func cents(_ amount: Int) -> String {
+        (Double(amount) / 100.0).formatted(.currency(code: "USD"))
+    }
+
+    static func serviceTotalCents(for appointment: Appointment) -> Int {
+        if let service = appointment.service {
+            return max(0, Int((service.price * 100).rounded()))
+        }
+        return max(appointment.paidAmountCents, Int((appointment.price * 100).rounded()))
+    }
+
+    static func balanceDueCents(for appointment: Appointment) -> Int {
+        max(0, serviceTotalCents(for: appointment) - appointment.paidAmountCents)
+    }
+
+    static func paymentLines(for appointment: Appointment) -> [String] {
+        guard appointment.paidAmountCents > 0 else {
+            return []
+        }
+
+        var lines: [String] = []
+        if appointment.depositAmountCents > 0 && balanceDueCents(for: appointment) > 0 {
+            lines.append("Deposit Paid \(cents(appointment.depositAmountCents))")
+            lines.append("Balance Due \(cents(balanceDueCents(for: appointment)))")
+        } else {
+            lines.append("Paid \(cents(appointment.paidAmountCents))")
+        }
+
+        if appointment.refundStatus == "deposit_retained" {
+            lines.append("Deposit Non-refundable")
+        } else if !appointment.refundStatus.isEmpty && appointment.refundStatus != "not_refunded" {
+            lines.append(refundLabel(appointment.refundStatus))
+        }
+
+        return lines
+    }
+
+    static func cancellationMessage(for appointment: Appointment) -> String {
+        guard appointment.paidAmountCents > 0 else {
+            return "This will cancel the appointment. No Stripe payment is attached to this booking."
+        }
+
+        let retainedDeposit = retainedDepositCents(for: appointment)
+        let refundAmount = max(0, appointment.paidAmountCents - retainedDeposit)
+        if retainedDeposit > 0 && refundAmount <= 0 {
+            return "Your \(cents(retainedDeposit)) deposit is non-refundable."
+        }
+        if retainedDeposit > 0 {
+            return "You will receive \(cents(refundAmount)) back. Your \(cents(retainedDeposit)) deposit is non-refundable."
+        }
+        return "You will receive \(cents(refundAmount)) back."
+    }
+
+    static func businessCancellationMessage(for appointment: Appointment) -> String {
+        guard appointment.paidAmountCents > 0 else {
+            return "This will cancel the appointment. No Stripe payment is attached to this booking."
+        }
+
+        let retainedDeposit = retainedDepositCents(for: appointment)
+        let refundAmount = max(0, appointment.paidAmountCents - retainedDeposit)
+        if retainedDeposit > 0 && refundAmount <= 0 {
+            return "This will cancel the appointment and retain the non-refundable \(cents(retainedDeposit)) deposit."
+        }
+        if retainedDeposit > 0 {
+            return "This will cancel the appointment, refund \(cents(refundAmount)), and retain the non-refundable \(cents(retainedDeposit)) deposit."
+        }
+        return "This will cancel the appointment and refund \(cents(refundAmount))."
+    }
+
+    private static func retainedDepositCents(for appointment: Appointment) -> Int {
+        guard appointment.depositAmountCents > 0 else { return 0 }
+        let cutoff = appointment.startTime.addingTimeInterval(-24 * 60 * 60)
+        return Date() >= cutoff ? min(appointment.depositAmountCents, appointment.paidAmountCents) : 0
+    }
+
+    private static func refundLabel(_ status: String) -> String {
+        switch status {
+        case "pending":
+            return "Refund Pending"
+        case "succeeded", "refunded":
+            return "Refunded"
+        case "canceled_before_capture":
+            return "Payment Canceled"
+        default:
+            return status.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+}
+
+struct AppointmentReminderScheduler {
+    static func scheduleTomorrowReminder(for appointment: Appointment, businessName: String? = nil) {
+        let identifier = "appointment-reminder-\(String(describing: appointment.id))"
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [identifier])
+
+        let reminderDate = appointment.startTime.addingTimeInterval(-24 * 60 * 60)
+        guard reminderDate > Date() else { return }
+
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+            guard granted else { return }
+
+            let content = UNMutableNotificationContent()
+            content.title = "Appointment Tomorrow"
+            let location = businessName?.isEmpty == false ? businessName! : appointment.employeeName
+            content.body = "Your appointment with \(location) is tomorrow at \(appointment.startTime.formatted(date: .omitted, time: .shortened))."
+            content.sound = .default
+
+            let triggerDate = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: reminderDate)
+            let request = UNNotificationRequest(
+                identifier: identifier,
+                content: content,
+                trigger: UNCalendarNotificationTrigger(dateMatching: triggerDate, repeats: false)
+            )
+            UNUserNotificationCenter.current().add(request)
+        }
+    }
+
+    static func cancelReminder(for appointment: Appointment) {
+        let identifier = "appointment-reminder-\(String(describing: appointment.id))"
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [identifier])
+    }
+}
+
+@MainActor
+final class CalendarEventWriter {
+    static let shared = CalendarEventWriter()
+    private let eventStore = EKEventStore()
+
+    func addAppointment(_ appointment: Appointment, businessName: String? = nil) async throws {
+        let granted: Bool
+        if #available(iOS 17.0, *) {
+            granted = try await eventStore.requestWriteOnlyAccessToEvents()
+        } else {
+            granted = try await eventStore.requestAccess(to: .event)
+        }
+        guard granted else { return }
+
+        let event = EKEvent(eventStore: eventStore)
+        event.title = appointment.service?.name ?? "Pianivo Appointment"
+        event.notes = paymentReceiptText(for: appointment, businessName: businessName)
+        event.startDate = appointment.startTime
+        event.endDate = appointment.endTime
+        event.calendar = eventStore.defaultCalendarForNewEvents
+        try eventStore.save(event, span: .thisEvent)
+    }
+}
+
+func paymentReceiptText(for appointment: Appointment, businessName: String? = nil) -> String {
+    var lines = [
+        "Business: \(businessName ?? appointment.businessCode)",
+        "Service: \(appointment.service?.name ?? "Appointment")",
+        "Date: \(appointment.startTime.formatted(date: .abbreviated, time: .shortened))"
+    ]
+    lines.append(contentsOf: AppointmentPaymentSummary.paymentLines(for: appointment))
+    return lines.joined(separator: "\n")
+}
+
+func addAppNotification(
+    in modelContext: ModelContext,
+    audience: String,
+    recipientName: String = "",
+    businessCode: String = "",
+    title: String,
+    message: String
+) {
+    modelContext.insert(AppNotification(
+        audience: audience,
+        recipientName: recipientName,
+        businessCode: businessCode,
+        title: title,
+        message: message
+    ))
+}
 
 // Returns first letter of word 1 + first letter of word 2 (falls back to first 2 chars)
 private func bizInitials(_ name: String) -> String {
@@ -28,6 +263,7 @@ struct ClientTabView: View {
     @State private var isShowingSidePanel = false
     @State private var isShowingSupport = false
     @State private var isShowingSettings = false
+    @State private var isShowingNotifications = false
     
     enum ClientSection { case home, discover, schedule, insights }
     
@@ -87,6 +323,16 @@ struct ClientTabView: View {
                     isShowingSettings = false
                     onAccountDeleted?()
                 }
+            }
+        }
+        .sheet(isPresented: $isShowingNotifications) {
+            NavigationStack {
+                NotificationCenterListView(audience: "client", recipientName: clientName, businessCode: "")
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { isShowingNotifications = false }
+                        }
+                    }
             }
         }
     }
@@ -168,6 +414,20 @@ struct ClientTabView: View {
 
                     Button {
                         withAnimation(.spring()) { isShowingSidePanel = false }
+                        isShowingNotifications = true
+                    } label: {
+                        HStack(spacing: 15) {
+                            Image(systemName: "bell.fill").foregroundColor(.teal).frame(width: 24)
+                            Text("Notifications").font(.subheadline.bold()).foregroundColor(.primary)
+                            Spacer()
+                        }
+                        .padding(.vertical, 12).padding(.horizontal, 10)
+                        .background(Color.teal.opacity(0.08))
+                        .cornerRadius(10)
+                    }
+
+                    Button {
+                        withAnimation(.spring()) { isShowingSidePanel = false }
                         isShowingSupport = true
                     } label: {
                         HStack(spacing: 15) {
@@ -237,6 +497,8 @@ struct ClientDashboardView: View {
     @State private var rescheduleAppt: Appointment? = nil
     @State private var showCancelConfirm = false
     @State private var cancelAppt: Appointment? = nil
+    @State private var isCancellingAppointment = false
+    @State private var cancellationErrorMessage: String?
     
     var myAppointments: [Appointment]  { allAppointments.filter { $0.customerName == clientName } }
     var nextAppointment: Appointment?  { myAppointments.first(where: { $0.startTime > Date() }) }
@@ -331,13 +593,24 @@ struct ClientDashboardView: View {
         .confirmationDialog("Cancel Appointment", isPresented: $showCancelConfirm, titleVisibility: .visible) {
             Button("Cancel Appointment", role: .destructive) {
                 if let appt = cancelAppt {
-                    appt.status = .cancelled
-                    try? modelContext.save()
+                    Task { await cancelAppointment(appt) }
                 }
             }
             Button("Keep It", role: .cancel) {}
         } message: {
-            Text("Are you sure you want to cancel this appointment? This cannot be undone.")
+            if let appt = cancelAppt {
+                Text(AppointmentPaymentSummary.cancellationMessage(for: appt))
+            } else {
+                Text("Are you sure you want to cancel this appointment? This cannot be undone.")
+            }
+        }
+        .alert("Unable to Cancel Appointment", isPresented: Binding(
+            get: { cancellationErrorMessage != nil },
+            set: { if !$0 { cancellationErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { cancellationErrorMessage = nil }
+        } message: {
+            Text(cancellationErrorMessage ?? "Please try again.")
         }
     }
     
@@ -377,6 +650,38 @@ struct ClientDashboardView: View {
         .shadow(color: .black.opacity(0.04), radius: 8, x: 0, y: 3)
         .padding(.horizontal)
         .animation(load.insertionAnimation, value: load)
+    }
+
+    private func cancelAppointment(_ appt: Appointment) async {
+        guard !isCancellingAppointment else { return }
+
+        isCancellingAppointment = true
+        defer { isCancellingAppointment = false }
+
+        do {
+            if let backendAppointmentID = appt.backendAppointmentID, !appt.stripePaymentIntentID.isEmpty {
+                let result = try await AppointmentPaymentCancellationService.cancelBackendAppointment(
+                    appointmentID: backendAppointmentID,
+                    paymentIntentID: appt.stripePaymentIntentID,
+                    customerEmail: appt.customerEmail
+                )
+                appt.refundStatus = result.refundStatus
+                addAppNotification(
+                    in: modelContext,
+                    audience: "client",
+                    recipientName: clientName,
+                    businessCode: appt.businessCode,
+                    title: "Appointment Canceled",
+                    message: "\(appt.service?.name ?? "Appointment") was canceled. \(AppointmentPaymentSummary.cancellationMessage(for: appt))"
+                )
+            }
+
+            appt.status = .cancelled
+            AppointmentReminderScheduler.cancelReminder(for: appt)
+            try modelContext.save()
+        } catch {
+            cancellationErrorMessage = error.localizedDescription
+        }
     }
     
     private var timeOfDayGreeting: String {
@@ -419,6 +724,17 @@ struct ClientDashboardView: View {
                     }
                     Spacer()
                     Capsule().fill(appt.service?.themeColor ?? .teal).frame(width: 28, height: 6)
+                }
+                let paymentLines = AppointmentPaymentSummary.paymentLines(for: appt)
+                if !paymentLines.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(paymentLines.enumerated()), id: \.offset) { _, line in
+                            Text(line)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .padding(18)
@@ -481,7 +797,7 @@ struct ClientDashboardView: View {
     }
     private func statusChip(_ raw: String) -> some View {
         let status = AppointmentStatus(rawValue: raw) ?? .pending
-        let color: Color = status == .confirmed ? .teal : status == .completed ? .green : status == .cancelled ? .gray : .orange
+        let color: Color = status == .confirmed ? .teal : status == .completed ? .green : status == .cancelled ? .gray : status == .noShow ? .red : .orange
         return Text(raw).font(.caption.bold()).foregroundColor(color)
             .padding(.horizontal, 10).padding(.vertical, 4)
             .background(color.opacity(0.1)).clipShape(Capsule())
@@ -671,9 +987,11 @@ struct BusinessDetailView: View {
     let business: BusinessProfile
     let clientName: String
     
+    @Environment(\.modelContext) private var modelContext
     @Query(sort: \Service.name) private var allServices: [Service]
     @Query(sort: \Employee.name) private var allEmployees: [Employee]
     @Query(sort: \Review.createdAt, order: .reverse) private var allReviews: [Review]
+    @Query(sort: \Appointment.startTime) private var allAppointments: [Appointment]
     
     @State private var searchText = ""
     @State private var selectedCategory = "All"
@@ -830,12 +1148,64 @@ struct BusinessDetailView: View {
         .sheet(item: $bookingService) { svc in
             HostedBookingView(
                 title: "Book \(svc.name)",
-                url: APIConfig.bookingURL(serviceName: svc.name, price: svc.price)
+                url: APIConfig.bookingURL(
+                    serviceName: svc.name,
+                    price: svc.price,
+                    businessCode: business.businessCode,
+                    businessName: business.studioName,
+                    requiresDeposit: business.requiresDeposit,
+                    depositPercentage: business.depositPercentage
+                ),
+                onBookingCompleted: { result in
+                    saveHostedBooking(result, service: svc)
+                }
             )
         }
         .sheet(isPresented: $isShowingReviewSheet) {
             LeaveReviewSheet(businessCode: business.businessCode, reviewerName: clientName)
         }
+    }
+
+    private func saveHostedBooking(_ result: HostedBookingResult, service: Service) {
+        if allAppointments.contains(where: { $0.backendAppointmentID == result.appointmentID }) {
+            return
+        }
+
+        let providerName = employees.first?.name ?? "TBD"
+        let paidAmount = Double(result.amountCents) / 100.0
+        let appointment = Appointment(
+            customerName: result.customerName.isEmpty ? clientName : result.customerName,
+            customerEmail: result.customerEmail,
+            employeeName: providerName,
+            startTime: result.startTime,
+            endTime: result.endTime,
+            price: paidAmount,
+            status: .confirmed,
+            businessCode: business.businessCode,
+            backendAppointmentID: result.appointmentID,
+            stripePaymentIntentID: result.paymentIntentID,
+            paidAmountCents: result.amountCents,
+            depositAmountCents: result.depositAmountCents
+        )
+        appointment.service = service
+        modelContext.insert(appointment)
+        addAppNotification(
+            in: modelContext,
+            audience: "client",
+            recipientName: appointment.customerName,
+            businessCode: business.businessCode,
+            title: "Booking Confirmed",
+            message: paymentReceiptText(for: appointment, businessName: business.studioName)
+        )
+        addAppNotification(
+            in: modelContext,
+            audience: "business",
+            businessCode: business.businessCode,
+            title: "New Paid Booking",
+            message: "\(appointment.customerName) booked \(service.name). \(AppointmentPaymentSummary.paymentLines(for: appointment).joined(separator: ", "))"
+        )
+        try? modelContext.save()
+        AppointmentReminderScheduler.scheduleTomorrowReminder(for: appointment, businessName: business.studioName)
     }
     
     private var businessInfoCard: some View {
@@ -974,6 +1344,7 @@ struct ClientBookingSheet: View {
     let business: BusinessProfile
     let service: Service
     let employees: [Employee]
+    @Query(sort: \Appointment.startTime) private var allAppointments: [Appointment]
     
     // Contact info fields
     @State private var contactName: String = ""
@@ -990,12 +1361,31 @@ struct ClientBookingSheet: View {
     @State private var isSaved = false
     @State private var showConfirmation = false
     @State private var showValidationError = false
+    @State private var showWaitlistConfirmation = false
     
     // Pre-fill name from logged-in clientName
     private var isFormValid: Bool {
         !contactName.trimmingCharacters(in: .whitespaces).isEmpty &&
         !contactPhone.trimmingCharacters(in: .whitespaces).isEmpty &&
         contactEmail.contains("@")
+    }
+
+    private var appointmentEndDate: Date {
+        appointmentDate.addingTimeInterval(TimeInterval(service.durationMinutes * 60))
+    }
+
+    private var hasSchedulingConflict: Bool {
+        allAppointments.contains { appointment in
+            guard appointment.businessCode == business.businessCode,
+                  appointment.status != .cancelled,
+                  appointment.status != .noShow,
+                  appointment.startTime < appointmentEndDate,
+                  appointment.endTime > appointmentDate else {
+                return false
+            }
+            guard let selectedEmployee else { return true }
+            return appointment.employeeName == selectedEmployee.name
+        }
     }
     
     var body: some View {
@@ -1097,8 +1487,22 @@ struct ClientBookingSheet: View {
                                 .foregroundColor(.teal).bold()
                         }
                         LabeledContent("End Time") {
-                            let end = appointmentDate.addingTimeInterval(TimeInterval(service.durationMinutes * 60))
-                            Text(end.formatted(date: .omitted, time: .shortened)).foregroundColor(.secondary)
+                            Text(appointmentEndDate.formatted(date: .omitted, time: .shortened)).foregroundColor(.secondary)
+                        }
+                        if hasSchedulingConflict {
+                            Label("This time is unavailable.", systemImage: "clock.badge.exclamationmark")
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                            Button {
+                                if isFormValid {
+                                    joinWaitlist()
+                                } else {
+                                    withAnimation { showValidationError = true }
+                                }
+                            } label: {
+                                Label("Join Waitlist", systemImage: "person.badge.clock")
+                                    .font(.subheadline.bold())
+                            }
                         }
                     }
                 }
@@ -1116,7 +1520,11 @@ struct ClientBookingSheet: View {
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Confirm") {
                             if isFormValid {
-                                saveBooking()
+                                if hasSchedulingConflict {
+                                    joinWaitlist()
+                                } else {
+                                    saveBooking()
+                                }
                             } else {
                                 withAnimation { showValidationError = true }
                             }
@@ -1126,6 +1534,11 @@ struct ClientBookingSheet: View {
                     }
                 }
             }
+        }
+        .alert("Added to Waitlist", isPresented: $showWaitlistConfirmation) {
+            Button("OK") { dismiss() }
+        } message: {
+            Text("\(business.studioName) can see your waitlist request and can contact you if that time opens.")
         }
     }
     
@@ -1207,22 +1620,68 @@ struct ClientBookingSheet: View {
     
     // MARK: Save
     private func saveBooking() {
-        let endTime = appointmentDate.addingTimeInterval(TimeInterval(service.durationMinutes * 60))
         let providerName = selectedEmployee?.name ?? (employees.first?.name ?? "TBD")
         let appt = Appointment(
             customerName: contactName,
             employeeName: providerName,
             startTime: appointmentDate,
-            endTime: endTime,
+            endTime: appointmentEndDate,
             price: service.price,
             status: .confirmed,
             businessCode: business.businessCode
         )
         appt.service = service
         modelContext.insert(appt)
+        addAppNotification(
+            in: modelContext,
+            audience: "client",
+            recipientName: contactName,
+            businessCode: business.businessCode,
+            title: "Booking Confirmed",
+            message: paymentReceiptText(for: appt, businessName: business.studioName)
+        )
+        addAppNotification(
+            in: modelContext,
+            audience: "business",
+            businessCode: business.businessCode,
+            title: "New Booking",
+            message: "\(contactName) booked \(service.name) for \(appointmentDate.formatted(date: .abbreviated, time: .shortened))."
+        )
         try? modelContext.save()
+        AppointmentReminderScheduler.scheduleTomorrowReminder(for: appt, businessName: business.studioName)
         isSaved = true
         withAnimation { showConfirmation = true }
+    }
+
+    private func joinWaitlist() {
+        guard !isSaved else { return }
+        let entry = WaitlistEntry(
+            clientName: contactName,
+            clientEmail: contactEmail,
+            businessCode: business.businessCode,
+            businessName: business.studioName,
+            serviceName: service.name,
+            preferredStartTime: appointmentDate
+        )
+        modelContext.insert(entry)
+        addAppNotification(
+            in: modelContext,
+            audience: "business",
+            businessCode: business.businessCode,
+            title: "New Waitlist Request",
+            message: "\(contactName) joined the waitlist for \(service.name) on \(appointmentDate.formatted(date: .abbreviated, time: .shortened))."
+        )
+        addAppNotification(
+            in: modelContext,
+            audience: "client",
+            recipientName: contactName,
+            businessCode: business.businessCode,
+            title: "Waitlist Request Sent",
+            message: "You joined the waitlist for \(service.name) at \(business.studioName)."
+        )
+        try? modelContext.save()
+        isSaved = true
+        showWaitlistConfirmation = true
     }
 }
 
@@ -1299,11 +1758,17 @@ struct ClientScheduleView: View {
             Spacer()
             VStack(alignment: .trailing, spacing: 6) {
                 let status = AppointmentStatus(rawValue: appt.statusRaw) ?? .pending
-                let color: Color = status == .confirmed ? .teal : status == .completed ? .green : status == .cancelled ? .gray : .orange
+                let color: Color = status == .confirmed ? .teal : status == .completed ? .green : status == .cancelled ? .gray : status == .noShow ? .red : .orange
                 Text(appt.statusRaw).font(.system(size: 10, weight: .bold)).foregroundColor(color)
                     .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(color.opacity(0.1)).clipShape(Capsule())
                 Text(appt.price.formatted(.currency(code: "USD"))).font(.caption.bold()).foregroundColor(.secondary)
+                ForEach(Array(AppointmentPaymentSummary.paymentLines(for: appt).enumerated()), id: \.offset) { _, line in
+                    Text(line)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.trailing)
+                }
             }
         }
         .padding(.vertical, 4)

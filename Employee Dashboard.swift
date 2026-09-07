@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import Foundation
 
 // MARK: - EMPLOYEE DASHBOARD
 
@@ -20,6 +21,8 @@ struct EmployeeDashboard: View {
     @State private var isShowingMessages = false
     @State private var isShowingSupport = false
     @State private var isShowingSettings = false
+    @State private var isShowingNotifications = false
+    @State private var isShowingWaitlist = false
     @State private var selectedApptForEdit: Appointment? = nil
     @State private var viewMode: DashboardViewMode = .calendar
     
@@ -142,6 +145,16 @@ struct EmployeeDashboard: View {
                 }
             }
         }
+        .sheet(isPresented: $isShowingNotifications) {
+            NavigationStack {
+                NotificationCenterListView(audience: "employee", recipientName: employeeName, businessCode: businessCode)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { isShowingNotifications = false }
+                        }
+                    }
+            }
+        }
     }
     
     // MARK: - Header
@@ -232,6 +245,16 @@ struct EmployeeDashboard: View {
                     }
                     .frame(maxWidth: .infinity).clipped()
                 }
+            }
+        }
+        .sheet(isPresented: $isShowingWaitlist) {
+            NavigationStack {
+                WaitlistManagerView(businessCode: businessCode)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { isShowingWaitlist = false }
+                        }
+                    }
             }
         }
         .padding().background(RoundedRectangle(cornerRadius: 24).fill(Color(.systemBackground))).padding(.horizontal)
@@ -342,6 +365,24 @@ struct EmployeeDashboard: View {
                         badge: myAppointments.count > 0 ? "\(myAppointments.count)" : nil
                     ) {
                         isShowingMessages = true
+                        withAnimation { isShowingSidePanel = false }
+                    }
+
+                    sidePanelNavButton(
+                        label: "Notifications",
+                        icon: "bell.fill",
+                        color: .teal
+                    ) {
+                        isShowingNotifications = true
+                        withAnimation { isShowingSidePanel = false }
+                    }
+
+                    sidePanelNavButton(
+                        label: "Waitlist",
+                        icon: "person.badge.clock",
+                        color: .purple
+                    ) {
+                        isShowingWaitlist = true
                         withAnimation { isShowingSidePanel = false }
                     }
                     
@@ -575,8 +616,12 @@ struct AppointmentActionCard: View {
     @State private var showConfirmAlert  = false
     @State private var showRejectAlert   = false
     @State private var showCompleteAlert = false
+    @State private var showNoShowAlert   = false
     @State private var showReschedule    = false
     @State private var showChat          = false
+    @State private var calendarMessage: String?
+    @State private var isCancellingAppointment = false
+    @State private var cancellationErrorMessage: String?
     
     // Status-driven visuals
     private var accent: Color {
@@ -584,6 +629,7 @@ struct AppointmentActionCard: View {
         case .confirmed: return .teal
         case .completed: return .green
         case .cancelled: return .gray
+        case .noShow:    return .red
         case .pending:   return .orange
         }
     }
@@ -592,6 +638,7 @@ struct AppointmentActionCard: View {
         case .confirmed: return Color.teal.opacity(0.05)
         case .completed: return Color.green.opacity(0.05)
         case .cancelled: return Color(.secondarySystemBackground)
+        case .noShow:    return Color.red.opacity(0.05)
         case .pending:   return Color.orange.opacity(0.05)
         }
     }
@@ -645,6 +692,12 @@ struct AppointmentActionCard: View {
                             .font(.caption.bold())
                             .foregroundColor(accent)
                     }
+
+                    ForEach(Array(AppointmentPaymentSummary.paymentLines(for: appt).enumerated()), id: \.offset) { _, line in
+                        Text(line)
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
                 }
                 .padding(.vertical, 14)
             }
@@ -683,10 +736,28 @@ struct AppointmentActionCard: View {
                         showReschedule = true
                     }
                     actionDivider
+
+                    // Calendar
+                    cardAction(label: "Calendar", icon: "calendar.badge.plus", color: .indigo) {
+                        Task {
+                            do {
+                                try await CalendarEventWriter.shared.addAppointment(appt)
+                                calendarMessage = "Appointment added to Apple Calendar."
+                            } catch {
+                                calendarMessage = error.localizedDescription
+                            }
+                        }
+                    }
+                    actionDivider
                     
                     // ✔ Complete
                     cardAction(label: "Complete", icon: "checkmark.seal.fill", color: .green) {
                         showCompleteAlert = true
+                    }
+                    actionDivider
+
+                    cardAction(label: "No-show", icon: "person.crop.circle.badge.xmark", color: .red) {
+                        showNoShowAlert = true
                     }
                 }
                 .padding(.vertical, 2)
@@ -716,6 +787,14 @@ struct AppointmentActionCard: View {
         .alert("Confirm Appointment?", isPresented: $showConfirmAlert) {
             Button("Confirm") {
                 withAnimation { appt.status = .confirmed }
+                addAppNotification(
+                    in: modelContext,
+                    audience: "client",
+                    recipientName: appt.customerName,
+                    businessCode: appt.businessCode,
+                    title: "Appointment Confirmed",
+                    message: "\(appt.service?.name ?? "Appointment") was confirmed for \(appt.startTime.formatted(date: .abbreviated, time: .shortened))."
+                )
                 try? modelContext.save()
                 SoundFeedbackManager.shared.playAddTaskSound()
             }
@@ -725,24 +804,64 @@ struct AppointmentActionCard: View {
         }
 
         .alert("Reject Appointment?", isPresented: $showRejectAlert) {
-            Button("Reject", role: .destructive) {
-                withAnimation { appt.status = .cancelled }
-                try? modelContext.save()
+            Button("Cancel Appointment", role: .destructive) {
+                Task { await cancelAppointment() }
             }
             Button("Keep", role: .cancel) {}
         } message: {
-            Text("This will cancel \(appt.customerName)'s session. This action cannot be undone.")
+            Text(AppointmentPaymentSummary.businessCancellationMessage(for: appt))
+        }
+        .alert("Unable to Cancel Appointment", isPresented: Binding(
+            get: { cancellationErrorMessage != nil },
+            set: { if !$0 { cancellationErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { cancellationErrorMessage = nil }
+        } message: {
+            Text(cancellationErrorMessage ?? "Please try again.")
         }
 
         .alert("Mark as Complete?", isPresented: $showCompleteAlert) {
             Button("Mark Complete") {
                 withAnimation { appt.status = .completed }
+                addAppNotification(
+                    in: modelContext,
+                    audience: "client",
+                    recipientName: appt.customerName,
+                    businessCode: appt.businessCode,
+                    title: "Appointment Completed",
+                    message: "\(appt.service?.name ?? "Appointment") was marked completed."
+                )
                 try? modelContext.save()
                 SoundFeedbackManager.shared.playCompleteTaskSound()
             }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Mark \(appt.customerName)'s session as completed?")
+        }
+
+        .alert("Mark as No-show?", isPresented: $showNoShowAlert) {
+            Button("Mark No-show", role: .destructive) {
+                withAnimation { appt.status = .noShow }
+                addAppNotification(
+                    in: modelContext,
+                    audience: "business",
+                    businessCode: appt.businessCode,
+                    title: "No-show Recorded",
+                    message: "\(appt.customerName) was marked as a no-show for \(appt.service?.name ?? "Appointment")."
+                )
+                try? modelContext.save()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Mark \(appt.customerName)'s session as a no-show? Payment/refund records stay attached to this appointment.")
+        }
+        .alert("Calendar", isPresented: Binding(
+            get: { calendarMessage != nil },
+            set: { if !$0 { calendarMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { calendarMessage = nil }
+        } message: {
+            Text(calendarMessage ?? "")
         }
     }
     
@@ -753,6 +872,38 @@ struct AppointmentActionCard: View {
             .background(accent.opacity(0.14))
             .foregroundColor(accent)
             .clipShape(Capsule())
+    }
+
+    private func cancelAppointment() async {
+        guard !isCancellingAppointment else { return }
+
+        isCancellingAppointment = true
+        defer { isCancellingAppointment = false }
+
+        do {
+            if let backendAppointmentID = appt.backendAppointmentID, !appt.stripePaymentIntentID.isEmpty {
+                let result = try await AppointmentPaymentCancellationService.cancelBackendAppointment(
+                    appointmentID: backendAppointmentID,
+                    paymentIntentID: appt.stripePaymentIntentID,
+                    customerEmail: appt.customerEmail
+                )
+                appt.refundStatus = result.refundStatus
+            }
+
+            withAnimation { appt.status = .cancelled }
+            AppointmentReminderScheduler.cancelReminder(for: appt)
+            addAppNotification(
+                in: modelContext,
+                audience: "client",
+                recipientName: appt.customerName,
+                businessCode: appt.businessCode,
+                title: "Appointment Canceled",
+                message: AppointmentPaymentSummary.businessCancellationMessage(for: appt)
+            )
+            try modelContext.save()
+        } catch {
+            cancellationErrorMessage = error.localizedDescription
+        }
     }
     
     private var actionDivider: some View {
@@ -847,6 +998,7 @@ struct EmployeeAddAppointmentSheet: View {
                         let a = Appointment(customerName: customerName, employeeName: fixedEmployeeName,
                                             startTime: date, endTime: end, price: s.price, status: .confirmed, businessCode: businessCode)
                         a.service = s; modelContext.insert(a); try? modelContext.save()
+                        AppointmentReminderScheduler.scheduleTomorrowReminder(for: a)
                         SoundFeedbackManager.shared.playAddTaskSound()
                         dismiss()
                     }
@@ -869,6 +1021,7 @@ struct DashboardAppointmentBlock: View {
         case .confirmed: return dayLoad.color
         case .completed: return .green
         case .cancelled: return .gray
+        case .noShow:    return .red
         case .pending:   return .orange
         }
     }

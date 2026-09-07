@@ -3,7 +3,7 @@ from django.utils import timezone
 from django.utils.html import format_html
 from django.urls import path
 from django.shortcuts import redirect, get_object_or_404
-from .models import Appointment, Business, Employee
+from .models import AppNotification, Appointment, Business, Employee, Payment, WaitlistEntry
 
 @admin.register(Appointment)
 class AppointmentAdmin(admin.ModelAdmin):
@@ -79,11 +79,46 @@ class AppointmentAdmin(admin.ModelAdmin):
 
 @admin.register(Business)
 class BusinessAdmin(admin.ModelAdmin):
-    list_display = ("name",)
+    list_display = ("name", "requires_deposit", "deposit_percentage", "employees_keep_own_client_profits")
     search_fields = ("name",)
+    list_filter = ("requires_deposit", "employees_keep_own_client_profits")
+
+
+@admin.register(Payment)
+class PaymentAdmin(admin.ModelAdmin):
+    list_display = (
+        "customer_name",
+        "business",
+        "amount",
+        "deposit_amount",
+        "refunded_amount",
+        "retained_deposit_amount",
+        "status",
+        "refund_status",
+        "payout_status",
+        "employee_earnings_amount",
+        "created_at",
+    )
+    list_filter = ("status", "refund_status", "payout_status", "business", "created_at")
+    search_fields = ("customer_name", "customer_email", "stripe_payment_intent_id")
+    readonly_fields = ("created_at", "updated_at")
 
 
 @admin.register(Employee)
 class BusinessEmployeeAdmin(admin.ModelAdmin):
-    list_display = ("user", "business")
+    list_display = ("user", "business", "commission_percentage")
     search_fields = ("user__username", "business__name")
+
+
+@admin.register(AppNotification)
+class AppNotificationAdmin(admin.ModelAdmin):
+    list_display = ("title", "audience", "recipient_name", "business", "is_read", "created_at")
+    list_filter = ("audience", "is_read", "business", "created_at")
+    search_fields = ("title", "message", "recipient_name")
+
+
+@admin.register(WaitlistEntry)
+class WaitlistEntryAdmin(admin.ModelAdmin):
+    list_display = ("customer_name", "business", "service_name", "preferred_start_time", "status", "created_at")
+    list_filter = ("status", "business", "preferred_start_time")
+    search_fields = ("customer_name", "customer_email", "service_name")

@@ -30,6 +30,8 @@ urlpatterns = [
     path('subscriptions/owner/success/', views.owner_subscription_success, name='owner_subscription_success'),
     path('subscriptions/owner/cancel/', views.owner_subscription_cancel, name='owner_subscription_cancel'),
     path('payments/create-intent/', views.create_payment_intent, name='create_payment_intent'),
+    path('waitlist/create/', views.create_waitlist_entry, name='create_waitlist_entry'),
+    path('appointments/<int:appointment_id>/cancel/', views.cancel_paid_appointment, name='cancel_paid_appointment'),
     path('payments/stripe/webhook/', views.stripe_webhook, name='stripe_webhook'),
 
     path('owner/api/messages/', views.api_get_messages, name='api_get_messages'),

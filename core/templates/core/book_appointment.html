@@ -403,7 +403,8 @@
                 <div class="summary">
                     <div class="summary-row"><span>Service</span><strong id="summary-service">Select a service</strong></div>
                     <div class="summary-row"><span>When</span><strong id="summary-time">Select a date and time</strong></div>
-                    <div class="summary-row"><span>Total</span><strong id="summary-total">${{ default_amount|floatformat:2 }} {{ currency }}</strong></div>
+                    <div class="summary-row"><span>Service total</span><strong id="summary-total">${{ default_amount|floatformat:2 }} {{ currency }}</strong></div>
+                    <div class="summary-row"><span id="amount-due-label">Due today</span><strong id="summary-due">${{ default_amount|floatformat:2 }} {{ currency }}</strong></div>
                 </div>
 
                 <div id="form-message" class="message hidden"></div>
@@ -424,7 +425,8 @@
                 <div class="summary" style="margin-bottom: 14px;">
                     <div class="summary-row"><span>Service</span><strong id="payment-summary-service">-</strong></div>
                     <div class="summary-row"><span>Appointment</span><strong id="payment-summary-time">-</strong></div>
-                    <div class="summary-row"><span>Total</span><strong id="payment-summary-total">-</strong></div>
+                    <div class="summary-row"><span>Service total</span><strong id="payment-summary-total">-</strong></div>
+                    <div class="summary-row"><span id="payment-due-label">Due today</span><strong id="payment-summary-due">-</strong></div>
                 </div>
 
                 <div class="stripe-box">
@@ -446,10 +448,11 @@
                 <div class="summary">
                     <div class="summary-row"><span>Service</span><strong id="success-service">-</strong></div>
                     <div class="summary-row"><span>When</span><strong id="success-time">-</strong></div>
-                    <div class="summary-row"><span>Total</span><strong id="success-total">-</strong></div>
+                    <div class="summary-row"><span>Service total</span><strong id="success-total">-</strong></div>
+                    <div class="summary-row"><span id="success-due-label">Paid today</span><strong id="success-due">-</strong></div>
                 </div>
                 <div class="done-actions">
-                    <a class="close-button" href="pianivo://close-booking">Done</a>
+                    <a id="done-link" class="close-button" href="pianivo://close-booking">Done</a>
                 </div>
             </section>
         </section>
@@ -462,6 +465,10 @@
         const params = new URLSearchParams(window.location.search);
         const queryService = (params.get("service") || "").trim();
         const queryPrice = Number(params.get("price") || defaultAmount);
+        const queryBusinessCode = (params.get("business_code") || "").trim();
+        const queryBusinessName = (params.get("business_name") || "").trim();
+        const depositEnabled = ["1", "true", "yes"].includes((params.get("deposit_enabled") || "").toLowerCase());
+        const requestedDepositPercentage = Number(params.get("deposit_percentage") || 0);
         const serviceOptions = queryService && Number.isFinite(queryPrice) && queryPrice >= 0.5
             ? [{ name: queryService, price: queryPrice }]
             : [
@@ -483,7 +490,9 @@
         let stripe;
         let elements;
         let paymentElement;
-        let latestSummary = { service: "-", time: "-", total: "-" };
+        let latestPayload = null;
+        let latestPaymentResult = null;
+        let latestSummary = { service: "-", time: "-", total: "-", due: "-" };
 
         function csrfToken() {
             return document.querySelector("[name=csrfmiddlewaretoken]").value;
@@ -495,6 +504,13 @@
 
         function moneyValue(amount) {
             return `$${amount.toFixed(2)} ${currency}`;
+        }
+
+        function amountDueFor(service) {
+            if (!depositEnabled || !Number.isFinite(requestedDepositPercentage) || requestedDepositPercentage <= 0) {
+                return service.price;
+            }
+            return Math.min(service.price, service.price * Math.min(100, requestedDepositPercentage) / 100);
         }
 
         function selectedStartDate() {
@@ -544,14 +560,19 @@
             const start = selectedStartDate();
             const timeText = start ? formatDate(start) : "Select a date and time";
             const totalText = moneyValue(service.price);
+            const dueAmount = amountDueFor(service);
+            const dueText = moneyValue(dueAmount);
+            const dueLabel = depositEnabled && dueAmount < service.price ? "Deposit due today" : "Due today";
 
             document.getElementById("service-heading").textContent = service.name;
             document.getElementById("summary-service").textContent = service.name;
             document.getElementById("summary-time").textContent = timeText;
             document.getElementById("summary-total").textContent = totalText;
-            document.getElementById("header-price").textContent = totalText;
+            document.getElementById("summary-due").textContent = dueText;
+            document.getElementById("amount-due-label").textContent = dueLabel;
+            document.getElementById("header-price").textContent = dueText;
 
-            latestSummary = { service: service.name, time: timeText, total: totalText };
+            latestSummary = { service: service.name, time: timeText, total: totalText, due: dueText };
         }
 
         function validateDetails() {
@@ -583,6 +604,11 @@
                 start_time: start.toISOString(),
                 end_time: end.toISOString(),
                 amount: Math.round(service.price * 100),
+                service_total_amount: Math.round(service.price * 100),
+                deposit_enabled: depositEnabled,
+                deposit_percentage: Math.min(100, Math.max(0, requestedDepositPercentage)),
+                business_code: queryBusinessCode,
+                business_name: queryBusinessName,
             };
         }
 
@@ -593,6 +619,8 @@
             document.getElementById("payment-summary-service").textContent = latestSummary.service;
             document.getElementById("payment-summary-time").textContent = latestSummary.time;
             document.getElementById("payment-summary-total").textContent = latestSummary.total;
+            document.getElementById("payment-summary-due").textContent = latestSummary.due;
+            document.getElementById("payment-due-label").textContent = document.getElementById("amount-due-label").textContent;
             setStep("payment");
         }
 
@@ -603,7 +631,29 @@
             document.getElementById("success-service").textContent = latestSummary.service;
             document.getElementById("success-time").textContent = latestSummary.time;
             document.getElementById("success-total").textContent = latestSummary.total;
+            document.getElementById("success-due").textContent = latestSummary.due;
+            document.getElementById("success-due-label").textContent = document.getElementById("payment-due-label").textContent.replace("Due", "Paid");
+            updateDoneLink();
             setStep("done");
+        }
+
+        function updateDoneLink() {
+            if (!latestPayload || !latestPaymentResult) {
+                return;
+            }
+
+            const doneParams = new URLSearchParams({
+                appointment_id: String(latestPaymentResult.appointment_id || ""),
+                payment_intent_id: String(latestPaymentResult.payment_intent_id || ""),
+                service_name: latestPayload.service_name,
+                customer_name: latestPayload.customer_name,
+                customer_email: latestPayload.customer_email,
+                start_time: latestPayload.start_time,
+                end_time: latestPayload.end_time,
+                amount: String(latestPaymentResult.amount || latestPayload.amount),
+                deposit_amount: String(latestPaymentResult.deposit_amount || 0),
+            });
+            document.getElementById("done-link").href = `pianivo://close-booking?${doneParams.toString()}`;
         }
 
         function initializeServices() {
@@ -653,6 +703,7 @@
             if (!payload) {
                 return;
             }
+            latestPayload = payload;
 
             prepareButton.disabled = true;
             prepareButton.textContent = "Preparing payment...";
@@ -671,6 +722,7 @@
                 if (!response.ok) {
                     throw new Error(data.error || "Could not prepare payment.");
                 }
+                latestPaymentResult = data;
 
                 stripe = Stripe(data.publishable_key);
                 elements = stripe.elements({

@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import StoreKit
 import UIKit
+import Security
 import FirebaseCore
 import FirebaseAuth
 
@@ -20,7 +21,9 @@ struct PianivoApp: App {
             OwnerClientMessage.self,
             EmployeeClientMessage.self,
             BusinessProfile.self,
-            Review.self
+            Review.self,
+            AppNotification.self,
+            WaitlistEntry.self
         ])
 
         // Tier 1: persistent storage
@@ -109,6 +112,7 @@ enum AppointmentStatus: String, Codable, CaseIterable {
     case confirmed = "Confirmed"
     case completed = "Completed"
     case cancelled = "Cancelled"
+    case noShow = "No-show"
     case pending = "Pending"
 }
 
@@ -178,12 +182,14 @@ final class Employee: Identifiable {
     var name: String
     var email: String = ""
     var joinDate: Date = Date()
+    var commissionPercentage: Double = 0
     /// Links this employee to a specific business (matches BusinessProfile.businessCode)
     var businessCode: String = ""
     
-    init(name: String, email: String = "", businessCode: String = "") {
+    init(name: String, email: String = "", businessCode: String = "", commissionPercentage: Double = 0) {
         self.name = name
         self.email = email
+        self.commissionPercentage = commissionPercentage
         self.businessCode = businessCode
     }
 }
@@ -191,6 +197,7 @@ final class Employee: Identifiable {
 @Model
 final class Appointment {
     var customerName: String
+    var customerEmail: String = ""
     var employeeName: String
     var startTime: Date
     var endTime: Date
@@ -199,6 +206,13 @@ final class Appointment {
     var isHighStress: Bool = false
     /// The business code this appointment belongs to
     var businessCode: String = ""
+    var backendAppointmentID: Int?
+    var stripePaymentIntentID: String = ""
+    var paidAmountCents: Int = 0
+    var depositAmountCents: Int = 0
+    var refundStatus: String = ""
+    var payoutStatus: String = "unpaid"
+    var employeeEarningsCents: Int = 0
     
     @Relationship(deleteRule: .nullify)
     var service: Service?
@@ -208,14 +222,64 @@ final class Appointment {
         set { statusRaw = newValue.rawValue }
     }
     
-    init(customerName: String, employeeName: String, startTime: Date, endTime: Date, price: Double, status: AppointmentStatus = .pending, businessCode: String = "") {
+    init(customerName: String, customerEmail: String = "", employeeName: String, startTime: Date, endTime: Date, price: Double, status: AppointmentStatus = .pending, businessCode: String = "", backendAppointmentID: Int? = nil, stripePaymentIntentID: String = "", paidAmountCents: Int = 0, depositAmountCents: Int = 0, refundStatus: String = "", payoutStatus: String = "unpaid", employeeEarningsCents: Int = 0) {
         self.customerName = customerName
+        self.customerEmail = customerEmail
         self.employeeName = employeeName
         self.startTime = startTime
         self.endTime = endTime
         self.price = price
         self.statusRaw = status.rawValue
         self.businessCode = businessCode
+        self.backendAppointmentID = backendAppointmentID
+        self.stripePaymentIntentID = stripePaymentIntentID
+        self.paidAmountCents = paidAmountCents
+        self.depositAmountCents = depositAmountCents
+        self.refundStatus = refundStatus
+        self.payoutStatus = payoutStatus
+        self.employeeEarningsCents = employeeEarningsCents
+    }
+}
+
+@Model
+final class AppNotification {
+    var id: UUID = UUID()
+    var audience: String
+    var recipientName: String
+    var businessCode: String
+    var title: String
+    var message: String
+    var createdAt: Date = Date()
+    var isRead: Bool = false
+
+    init(audience: String, recipientName: String = "", businessCode: String = "", title: String, message: String) {
+        self.audience = audience
+        self.recipientName = recipientName
+        self.businessCode = businessCode
+        self.title = title
+        self.message = message
+    }
+}
+
+@Model
+final class WaitlistEntry {
+    var id: UUID = UUID()
+    var clientName: String
+    var clientEmail: String
+    var businessCode: String
+    var businessName: String
+    var serviceName: String
+    var preferredStartTime: Date
+    var createdAt: Date = Date()
+    var status: String = "Waiting"
+
+    init(clientName: String, clientEmail: String = "", businessCode: String, businessName: String, serviceName: String, preferredStartTime: Date) {
+        self.clientName = clientName
+        self.clientEmail = clientEmail
+        self.businessCode = businessCode
+        self.businessName = businessName
+        self.serviceName = serviceName
+        self.preferredStartTime = preferredStartTime
     }
 }
 
@@ -272,6 +336,9 @@ final class BusinessProfile {
     var about: String
     /// Category/type of business for discovery (e.g. "Wellness", "Music", "Beauty")
     var businessCategory: String = ""
+    var requiresDeposit: Bool = false
+    var depositPercentage: Double = 0
+    var employeesKeepOwnClientProfits: Bool = false
     
     init(
         businessCode: String = "",
@@ -291,7 +358,10 @@ final class BusinessProfile {
         saturdayHours: String = "10:00 AM – 4:00 PM",
         sundayHours: String = "Closed",
         about: String = "",
-        businessCategory: String = ""
+        businessCategory: String = "",
+        requiresDeposit: Bool = false,
+        depositPercentage: Double = 0,
+        employeesKeepOwnClientProfits: Bool = false
     ) {
         self.businessCode = businessCode
         self.studioName = studioName
@@ -311,6 +381,9 @@ final class BusinessProfile {
         self.sundayHours = sundayHours
         self.about = about
         self.businessCategory = businessCategory
+        self.requiresDeposit = requiresDeposit
+        self.depositPercentage = depositPercentage
+        self.employeesKeepOwnClientProfits = employeesKeepOwnClientProfits
     }
 }
 
@@ -447,6 +520,79 @@ enum AccountDeletionError: LocalizedError {
     }
 }
 
+struct RememberedSignIn {
+    private static let rememberKey = "pianivo.rememberSignIn.enabled"
+    private static let emailKey = "pianivo.rememberSignIn.email"
+    private static let keychainService = "com.pianivo.mindfulscheduling.signin"
+    private static let passwordAccount = "remembered-password"
+
+    static var isEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: rememberKey) }
+        set { UserDefaults.standard.set(newValue, forKey: rememberKey) }
+    }
+
+    static var email: String {
+        UserDefaults.standard.string(forKey: emailKey) ?? ""
+    }
+
+    static var password: String {
+        readPasswordFromKeychain()
+    }
+
+    static func save(email: String, password: String) {
+        UserDefaults.standard.set(true, forKey: rememberKey)
+        UserDefaults.standard.set(email, forKey: emailKey)
+        savePasswordToKeychain(password)
+    }
+
+    static func clear() {
+        UserDefaults.standard.set(false, forKey: rememberKey)
+        UserDefaults.standard.removeObject(forKey: emailKey)
+        deletePasswordFromKeychain()
+    }
+
+    private static func readPasswordFromKeychain() -> String {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: passwordAccount,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data,
+              let password = String(data: data, encoding: .utf8) else {
+            return ""
+        }
+        return password
+    }
+
+    private static func savePasswordToKeychain(_ password: String) {
+        deletePasswordFromKeychain()
+        guard let data = password.data(using: .utf8) else { return }
+
+        let item: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: passwordAccount,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecValueData as String: data
+        ]
+        SecItemAdd(item as CFDictionary, nil)
+    }
+
+    private static func deletePasswordFromKeychain() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: passwordAccount
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+}
+
 @MainActor
 final class OwnerIAPSubscriptionService: ObservableObject {
     @Published private(set) var products: [Product] = []
@@ -516,6 +662,7 @@ final class OwnerIAPSubscriptionService: ObservableObject {
     }
 
     func refreshEntitlements() async {
+        hasActiveOwnerSubscription = false
         var activeSubscriptionFound = false
 
         for await result in StoreKit.Transaction.currentEntitlements {
@@ -1193,6 +1340,7 @@ struct SignInView: View {
     
     @State private var email = ""
     @State private var password = ""
+    @State private var rememberMe = false
     @State private var errorMessage: String?
     @State private var isSigningIn = false
     
@@ -1207,6 +1355,12 @@ struct SignInView: View {
                     VStack(spacing: 14) {
                         AuthField(icon: "envelope", placeholder: "Email", text: $email, isSecure: false)
                         AuthField(icon: "lock", placeholder: "Password", text: $password, isSecure: true)
+                        Toggle(isOn: $rememberMe) {
+                            Label("Remember Me", systemImage: rememberMe ? "checkmark.circle.fill" : "circle")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        .tint(.teal)
                     }
                     .padding(.horizontal)
 
@@ -1239,6 +1393,13 @@ struct SignInView: View {
                     Button("Cancel") { dismiss() }
                 }
             }
+            .onAppear {
+                rememberMe = RememberedSignIn.isEnabled
+                if rememberMe {
+                    email = RememberedSignIn.email
+                    password = RememberedSignIn.password
+                }
+            }
         }
     }
     
@@ -1258,6 +1419,11 @@ struct SignInView: View {
             userName = localUser.name
             loggedInUserId = localUser.id
             selectedRole = localUser.role
+            if rememberMe {
+                RememberedSignIn.save(email: cleanEmail, password: password)
+            } else {
+                RememberedSignIn.clear()
+            }
             dismiss()
         } catch {
             errorMessage = error.localizedDescription

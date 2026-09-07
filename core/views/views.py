@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from django.conf import settings
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import HttpResponse, JsonResponse
@@ -13,7 +13,7 @@ from django.core.exceptions import PermissionDenied, ImproperlyConfigured
 from django_ratelimit.decorators import ratelimit
 
 from core.firebase import firebase_status
-from core.models import Business, Appointment, Employee, Conversation, Message, Payment, OwnerSubscription
+from core.models import AppNotification, Business, Appointment, Employee, Conversation, Message, Payment, OwnerSubscription, WaitlistEntry
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,11 @@ def parse_client_datetime(value):
 
 def get_public_business(request, data=None):
     data = data or {}
+    business_code = (data.get("business_code") or request.GET.get("business_code") or "").strip()
+    if business_code:
+        business = Business.objects.filter(subdomain__iexact=business_code).first()
+        if business:
+            return business
     business_slug = data.get("business_slug") or getattr(request, "subdomain", None)
     if business_slug:
         business = Business.objects.filter(slug=business_slug).first()
@@ -88,6 +93,76 @@ def subscription_status_from_checkout(session):
     if isinstance(subscription, dict):
         return subscription.get("status") or session.get("status") or "unknown"
     return session.get("status") or "unknown"
+
+def cents_from_decimal(value, default=0):
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0, int(round(amount * 100)))
+
+def deposit_policy_for_request(business, data):
+    service_total_amount = max(0, int(data.get("service_total_amount") or data.get("amount") or 0))
+    requested_deposit_percentage = int(float(data.get("deposit_percentage") or 0))
+    query_deposit_enabled = str(data.get("deposit_enabled", "")).lower() in {"1", "true", "yes"}
+
+    deposit_enabled = bool(getattr(business, "requires_deposit", False)) or query_deposit_enabled
+    configured_percentage = getattr(business, "deposit_percentage", 0) or requested_deposit_percentage
+    deposit_percentage = min(100, max(0, int(configured_percentage)))
+    deposit_amount = round(service_total_amount * deposit_percentage / 100) if deposit_enabled else 0
+    amount_to_charge = deposit_amount if deposit_enabled and deposit_amount > 0 else service_total_amount
+
+    return service_total_amount, amount_to_charge, deposit_amount
+
+def employee_from_request(business, data):
+    employee_id = data.get("employee_id")
+    employee_name = (data.get("employee_name") or "").strip()
+    if employee_id:
+        return Employee.objects.filter(id=employee_id, business=business).first()
+    if employee_name:
+        return Employee.objects.filter(user__username__iexact=employee_name, business=business).first()
+    return None
+
+def employee_has_conflict(employee, start_time, end_time):
+    if employee is None:
+        return False
+    return Appointment.objects.filter(
+        employee=employee,
+        start_time__lt=end_time,
+        end_time__gt=start_time,
+    ).exclude(status__in=["cancelled", "rejected", "no_show"]).exists()
+
+def business_has_conflict(business, start_time, end_time):
+    return Appointment.objects.filter(
+        business=business,
+        start_time__lt=end_time,
+        end_time__gt=start_time,
+    ).exclude(status__in=["cancelled", "rejected", "no_show"]).exists()
+
+def employee_earnings_amount(business, employee, payment_amount):
+    if employee is None:
+        return 0
+    if getattr(business, "employees_keep_own_client_profits", False):
+        return payment_amount
+    commission = min(100, max(0, int(getattr(employee, "commission_percentage", 0) or 0)))
+    return round(payment_amount * commission / 100)
+
+def create_app_notification(audience, title, message, business=None, recipient_name=""):
+    return AppNotification.objects.create(
+        audience=audience,
+        recipient_name=recipient_name,
+        business=business,
+        title=title,
+        message=message,
+    )
+
+def retained_deposit_for(payment):
+    if payment.deposit_amount <= 0 or not payment.appointment:
+        return 0
+    cutoff = payment.appointment.start_time - timedelta(hours=24)
+    if timezone.now() >= cutoff:
+        return min(payment.deposit_amount, payment.amount)
+    return 0
 
 # --- OWNER VIEWS ---
 
@@ -264,8 +339,9 @@ def create_payment_intent(request):
     try:
         stripe = require_stripe()
         data = json.loads(request.body)
-        amount = int(data.get("amount", 0))
-        if amount < 50:
+        service_total_amount = int(data.get("service_total_amount") or data.get("amount") or 0)
+        amount = service_total_amount
+        if service_total_amount < 50:
             return JsonResponse({"error": "Amount must be at least 50 cents."}, status=400)
 
         business = get_public_business(request, data)
@@ -277,17 +353,43 @@ def create_payment_intent(request):
         if not customer_name:
             return JsonResponse({"error": "Customer name is required."}, status=400)
 
+        service_total_amount, amount, deposit_amount = deposit_policy_for_request(business, data)
+        if amount < 50:
+            return JsonResponse({"error": "Payment amount must be at least 50 cents."}, status=400)
+
         appointment = None
+        employee = None
         if data.get("start_time") and data.get("end_time"):
+            start_time = parse_client_datetime(data.get("start_time"))
+            end_time = parse_client_datetime(data.get("end_time"))
+            employee = employee_from_request(business, data)
+            if employee_has_conflict(employee, start_time, end_time):
+                return JsonResponse({
+                    "error": "That employee already has an appointment at this time. Please choose another time or join the waitlist."
+                }, status=409)
+            if employee is None and business_has_conflict(business, start_time, end_time):
+                return JsonResponse({
+                    "error": "That time is unavailable. Please choose another time or join the waitlist."
+                }, status=409)
+
             appointment = Appointment.objects.create(
                 customer_name=customer_name,
                 customer_email=customer_email,
                 business=business,
-                start_time=parse_client_datetime(data.get("start_time")),
-                end_time=parse_client_datetime(data.get("end_time")),
+                employee=employee,
+                start_time=start_time,
+                end_time=end_time,
                 status="pending"
             )
+            appointment.employee_earnings_amount = employee_earnings_amount(business, employee, amount)
+            appointment.save(update_fields=["employee_earnings_amount"])
             Conversation.objects.get_or_create(appointment=appointment)
+            create_app_notification(
+                "business",
+                "New Booking Started",
+                f"{customer_name} started booking an appointment.",
+                business=business,
+            )
 
         intent = stripe.PaymentIntent.create(
             amount=amount,
@@ -298,14 +400,20 @@ def create_payment_intent(request):
                 "business_id": str(business.id),
                 "appointment_id": str(appointment.id) if appointment else "",
                 "customer_name": customer_name,
+                "service_total_amount": str(service_total_amount),
+                "deposit_amount": str(deposit_amount),
             },
         )
+        earnings_amount = employee_earnings_amount(business, employee, amount)
         Payment.objects.create(
             business=business,
             appointment=appointment,
             customer_name=customer_name,
             customer_email=customer_email,
             amount=amount,
+            service_total_amount=service_total_amount,
+            deposit_amount=deposit_amount,
+            employee_earnings_amount=earnings_amount,
             currency=settings.STRIPE_CURRENCY,
             status=intent.status,
             stripe_payment_intent_id=intent.id,
@@ -315,11 +423,166 @@ def create_payment_intent(request):
             "publishable_key": settings.STRIPE_PUBLISHABLE_KEY,
             "payment_intent_id": intent.id,
             "appointment_id": appointment.id if appointment else None,
+            "amount": amount,
+            "service_total_amount": service_total_amount,
+            "deposit_amount": deposit_amount,
         })
     except ImproperlyConfigured as exc:
         return JsonResponse({"error": str(exc)}, status=503)
     except Exception as exc:
         logger.exception("PaymentIntent creation failed")
+        return JsonResponse({"error": str(exc)}, status=400)
+
+@require_POST
+@csrf_exempt
+@ratelimit(key='ip', rate='10/m', block=True)
+def create_waitlist_entry(request):
+    try:
+        data = json.loads(request.body or "{}")
+        business = get_public_business(request, data)
+        if business is None:
+            return JsonResponse({"error": "No business is configured yet."}, status=404)
+
+        customer_name = data.get("customer_name", "").strip()
+        service_name = data.get("service_name", "").strip()
+        start_time_value = data.get("preferred_start_time") or data.get("start_time")
+        if not customer_name or not service_name or not start_time_value:
+            return JsonResponse({"error": "Customer name, service, and preferred time are required."}, status=400)
+
+        entry = WaitlistEntry.objects.create(
+            business=business,
+            customer_name=customer_name,
+            customer_email=data.get("customer_email", "").strip() or None,
+            service_name=service_name,
+            preferred_start_time=parse_client_datetime(start_time_value),
+        )
+        create_app_notification(
+            "business",
+            "New Waitlist Request",
+            f"{customer_name} joined the waitlist for {service_name}.",
+            business=business,
+        )
+        return JsonResponse({"success": True, "waitlist_id": entry.id}, status=201)
+    except Exception as exc:
+        logger.exception("Waitlist entry creation failed")
+        return JsonResponse({"error": str(exc)}, status=400)
+
+@require_POST
+@csrf_exempt
+@ratelimit(key='ip', rate='10/m', block=True)
+def cancel_paid_appointment(request, appointment_id):
+    try:
+        stripe = require_stripe()
+        data = json.loads(request.body or "{}")
+        payment_intent_id = (data.get("payment_intent_id") or "").strip()
+        customer_email = (data.get("customer_email") or "").strip().lower()
+
+        appointment = get_object_or_404(Appointment, id=appointment_id)
+        payment_query = Payment.objects.filter(appointment=appointment)
+        if payment_intent_id:
+            payment_query = payment_query.filter(stripe_payment_intent_id=payment_intent_id)
+        payment = payment_query.order_by("-created_at").first()
+
+        if not payment:
+            appointment.status = "cancelled"
+            appointment.save(update_fields=["status"])
+            create_app_notification(
+                "business",
+                "Appointment Canceled",
+                f"{appointment.customer_name}'s appointment was canceled. No Stripe payment was attached.",
+                business=appointment.business,
+            )
+            return JsonResponse({
+                "success": True,
+                "appointment_status": appointment.status,
+                "payment_status": "none",
+                "refund_status": "not_refunded",
+                "refunded_amount": 0,
+                "retained_deposit_amount": 0,
+            })
+
+        if payment.customer_email and payment.customer_email.lower() != customer_email:
+            return JsonResponse({"error": "This payment does not match the booking email."}, status=403)
+
+        if payment.refund_status in {"succeeded", "pending", "canceled_before_capture", "deposit_retained"}:
+            appointment.status = "cancelled"
+            appointment.save(update_fields=["status"])
+            create_app_notification(
+                "business",
+                "Appointment Already Canceled",
+                f"{appointment.customer_name}'s appointment already has refund status {payment.refund_status}.",
+                business=appointment.business,
+            )
+            return JsonResponse({
+                "success": True,
+                "appointment_status": appointment.status,
+                "payment_status": payment.status,
+                "refund_status": payment.refund_status,
+                "refunded_amount": payment.refunded_amount,
+                "retained_deposit_amount": payment.retained_deposit_amount,
+            })
+
+        intent = stripe.PaymentIntent.retrieve(payment.stripe_payment_intent_id)
+        status = intent.get("status") or payment.status
+        retained_deposit = retained_deposit_for(payment)
+        refund_amount = max(0, payment.amount - retained_deposit)
+
+        if status in {"requires_payment_method", "requires_confirmation", "requires_action", "processing"}:
+            canceled_intent = stripe.PaymentIntent.cancel(payment.stripe_payment_intent_id)
+            payment.status = canceled_intent.get("status") or "canceled"
+            payment.refund_status = "canceled_before_capture"
+            payment.refunded_amount = 0
+        elif status == "succeeded" and refund_amount > 0:
+            refund = stripe.Refund.create(
+                payment_intent=payment.stripe_payment_intent_id,
+                amount=refund_amount,
+                reason="requested_by_customer",
+                metadata={
+                    "appointment_id": str(appointment.id),
+                    "retained_deposit_amount": str(retained_deposit),
+                },
+            )
+            payment.status = status
+            payment.refund_status = refund.get("status") or "refund_created"
+            payment.refunded_amount = refund_amount
+        elif status == "succeeded":
+            payment.status = status
+            payment.refund_status = "deposit_retained"
+            payment.refunded_amount = 0
+        else:
+            payment.status = status
+            payment.refund_status = "not_refunded"
+
+        payment.retained_deposit_amount = retained_deposit
+        payment.save()
+
+        appointment.status = "cancelled"
+        appointment.save(update_fields=["status"])
+        if payment.refund_status == "deposit_retained":
+            refund_message = f"Deposit retained: {payment.retained_deposit_amount} cents."
+        elif payment.refunded_amount > 0:
+            refund_message = f"Refund issued: {payment.refunded_amount} cents."
+        else:
+            refund_message = f"Refund status: {payment.refund_status}."
+        create_app_notification(
+            "business",
+            "Appointment Canceled",
+            f"{appointment.customer_name}'s appointment was canceled. {refund_message}",
+            business=appointment.business,
+        )
+
+        return JsonResponse({
+            "success": True,
+            "appointment_status": appointment.status,
+            "payment_status": payment.status,
+            "refund_status": payment.refund_status,
+            "refunded_amount": payment.refunded_amount,
+            "retained_deposit_amount": payment.retained_deposit_amount,
+        })
+    except ImproperlyConfigured as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+    except Exception as exc:
+        logger.exception("Paid appointment cancellation failed")
         return JsonResponse({"error": str(exc)}, status=400)
 
 @require_POST

@@ -17,6 +17,7 @@ struct OwnerDashboard: View {
     var onAccountDeleted: (() -> Void)? = nil
     
     @Query(sort: \Appointment.startTime) private var allAppointments: [Appointment]
+    @Query(sort: \Employee.name) private var allEmployees: [Employee]
     @Query private var loggedInUsers: [User]
     @Query private var profiles: [BusinessProfile]
     
@@ -34,6 +35,8 @@ struct OwnerDashboard: View {
     @State private var isShowingBusinessProfile = false
     @State private var isShowingSupport = false
     @State private var isShowingSettings = false
+    @State private var isShowingNotifications = false
+    @State private var isShowingWaitlist = false
     
     // Revenue Toggle State
     @State private var revenuePeriod: RevenuePeriod = .day
@@ -71,6 +74,10 @@ struct OwnerDashboard: View {
         ownerBusinessCode.isEmpty ? allAppointments : allAppointments.filter { $0.businessCode == ownerBusinessCode }
     }
 
+    private var businessEmployees: [Employee] {
+        ownerBusinessCode.isEmpty ? allEmployees : allEmployees.filter { $0.businessCode == ownerBusinessCode }
+    }
+
     private var businessSupportEmail: String? {
         if let email = profiles.first?.email.trimmingCharacters(in: .whitespacesAndNewlines), !email.isEmpty {
             return email
@@ -79,7 +86,9 @@ struct OwnerDashboard: View {
     }
 
     private var revenueAppointments: [Appointment] {
-        businessAppointments.filter { $0.status == .completed || $0.status == .confirmed }
+        businessAppointments.filter {
+            $0.status == .completed || $0.status == .confirmed || $0.paidAmountCents > 0
+        }
     }
     
     private var calculatedRevenue: Double {
@@ -164,6 +173,26 @@ struct OwnerDashboard: View {
                             isShowingSettings = false
                             onAccountDeleted?()
                         }
+                    }
+                }
+                .sheet(isPresented: $isShowingNotifications) {
+                    NavigationStack {
+                        NotificationCenterListView(audience: "owner", recipientName: loggedInUsers.first?.name ?? "Owner", businessCode: ownerBusinessCode)
+                            .toolbar {
+                                ToolbarItem(placement: .topBarTrailing) {
+                                    Button("Done") { isShowingNotifications = false }
+                                }
+                        }
+                    }
+                }
+                .sheet(isPresented: $isShowingWaitlist) {
+                    NavigationStack {
+                        WaitlistManagerView(businessCode: ownerBusinessCode)
+                            .toolbar {
+                                ToolbarItem(placement: .topBarTrailing) {
+                                    Button("Done") { isShowingWaitlist = false }
+                                }
+                            }
                     }
                 }
                 .sheet(item: $revenueReportFile) { file in
@@ -415,28 +444,50 @@ struct OwnerDashboard: View {
         let recent = selectedRevenueAppointments().sorted { $0.startTime > $1.startTime }.prefix(8)
 
         return VStack(alignment: .leading, spacing: 14) {
-            Label("Recent Paid Appointments", systemImage: "creditcard.fill")
+            Label("Transaction Dashboard", systemImage: "creditcard.fill")
                 .font(.headline)
 
             if recent.isEmpty {
-                Text("Paid appointments will appear here after clients book and pay.")
+                Text("Paid appointments, deposits, balances, and refunds will appear here after clients book.")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 VStack(spacing: 10) {
                     ForEach(Array(recent), id: \.id) { appt in
-                        HStack(spacing: 12) {
+                        HStack(alignment: .top, spacing: 12) {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(appt.customerName)
                                     .font(.subheadline.bold())
                                 Text("\(appt.startTime.formatted(date: .abbreviated, time: .shortened)) • \(appt.service?.name ?? "Appointment")")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
+                                Text(appt.status.rawValue)
+                                    .font(.caption2.bold())
+                                    .foregroundColor(appt.status == .cancelled ? .gray : appt.status == .noShow ? .red : .secondary)
                             }
                             Spacer()
-                            Text(appt.price.formatted(.currency(code: "USD")))
-                                .font(.subheadline.bold())
+                            VStack(alignment: .trailing, spacing: 3) {
+                                ForEach(Array(AppointmentPaymentSummary.paymentLines(for: appt).enumerated()), id: \.offset) { _, line in
+                                    Text(line)
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                        .multilineTextAlignment(.trailing)
+                                }
+                                Text("Employee Earned \(employeeEarnings(for: appt).formatted(.currency(code: "USD")))")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                Text(appt.payoutStatus == "paid" ? "Employee Paid" : "Employee Unpaid")
+                                    .font(.caption2.bold())
+                                    .foregroundColor(appt.payoutStatus == "paid" ? .green : .orange)
+                                Button(appt.payoutStatus == "paid" ? "Mark Unpaid" : "Mark Paid") {
+                                    appt.employeeEarningsCents = Int((employeeEarnings(for: appt) * 100).rounded())
+                                    appt.payoutStatus = appt.payoutStatus == "paid" ? "unpaid" : "paid"
+                                    try? modelContext.save()
+                                }
+                                .font(.caption2.bold())
+                                .foregroundColor(.teal)
+                            }
                         }
                         .padding(.vertical, 6)
                     }
@@ -492,6 +543,15 @@ struct OwnerDashboard: View {
 
     private func previousRevenueTotal(for period: RevenuePeriod) -> Double {
         appointments(in: previousDateInterval(for: period)).reduce(0) { $0 + $1.price }
+    }
+
+    private func employeeEarnings(for appointment: Appointment) -> Double {
+        let paidAmount = appointment.paidAmountCents > 0 ? Double(appointment.paidAmountCents) / 100.0 : appointment.price
+        if profiles.first(where: { $0.businessCode == ownerBusinessCode })?.employeesKeepOwnClientProfits == true {
+            return paidAmount
+        }
+        let commission = businessEmployees.first(where: { $0.name == appointment.employeeName })?.commissionPercentage ?? 0
+        return paidAmount * max(0, min(100, commission)) / 100.0
     }
 
     private func appointmentCount(for period: RevenuePeriod) -> Int {
@@ -743,6 +803,22 @@ struct OwnerDashboard: View {
                         }
                         Button { isShowingServiceManager = true } label: { Label("Services & Prices", systemImage: "tag.fill").font(.subheadline).foregroundColor(.primary) }
                         Button { isShowingEmployeeManager = true } label: { Label("Staff Members", systemImage: "person.2.fill").font(.subheadline).foregroundColor(.primary) }
+                        Button {
+                            isShowingWaitlist = true
+                            withAnimation { isShowingSidePanel = false }
+                        } label: {
+                            Label("Waitlist", systemImage: "person.badge.clock")
+                                .font(.subheadline)
+                                .foregroundColor(.primary)
+                        }
+                        Button {
+                            isShowingNotifications = true
+                            withAnimation { isShowingSidePanel = false }
+                        } label: {
+                            Label("Notifications", systemImage: "bell.fill")
+                                .font(.subheadline)
+                                .foregroundColor(.primary)
+                        }
                     }.padding(.horizontal, 5)
 
                     Divider()
@@ -1216,6 +1292,7 @@ struct AddAppointmentSheet: View {
         newAppt.service = service
         modelContext.insert(newAppt)
         try? modelContext.save()
+        AppointmentReminderScheduler.scheduleTomorrowReminder(for: newAppt)
         dismiss()
     }
 }
@@ -1459,6 +1536,7 @@ struct EmployeeManagerSheet: View {
     
     @State private var newEmployeeName = ""
     @State private var newEmployeeEmail = ""
+    @State private var newEmployeeCommission = ""
     @State private var generatedInviteToken = ""
     @State private var generatedInviteEmail = ""
     @State private var generatedInviteError: String?
@@ -1523,6 +1601,8 @@ struct EmployeeManagerSheet: View {
                             .keyboardType(.emailAddress)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
+                        TextField("Commission percentage", text: $newEmployeeCommission)
+                            .keyboardType(.decimalPad)
 
                         Button {
                             Task { await addEmployeeAndGenerateInvite() }
@@ -1589,7 +1669,25 @@ struct EmployeeManagerSheet: View {
                                     Text(employee.name).font(.body)
                                     Text(employee.email.isEmpty ? "Joined \(employee.joinDate.formatted(date: .abbreviated, time: .omitted))" : employee.email)
                                         .font(.caption2).foregroundColor(.secondary)
+                                    Text("Commission \(employee.commissionPercentage, specifier: "%.0f")%")
+                                        .font(.caption2)
+                                        .foregroundColor(.teal)
                                 }
+                                Spacer()
+                                Button {
+                                    employee.commissionPercentage = min(100, employee.commissionPercentage + 5)
+                                    try? modelContext.save()
+                                } label: {
+                                    Image(systemName: "plus.circle")
+                                }
+                                .buttonStyle(.plain)
+                                Button {
+                                    employee.commissionPercentage = max(0, employee.commissionPercentage - 5)
+                                    try? modelContext.save()
+                                } label: {
+                                    Image(systemName: "minus.circle")
+                                }
+                                .buttonStyle(.plain)
                             }
                         }
                         .onDelete(perform: deleteEmployees)
@@ -1631,7 +1729,8 @@ struct EmployeeManagerSheet: View {
 
         do {
             let token = try await StaffInviteService.createInvite(email: cleanEmail, businessCode: businessCode, studioName: studioName)
-            let employee = Employee(name: cleanName, email: cleanEmail, businessCode: businessCode)
+            let commission = min(100, max(0, Double(newEmployeeCommission) ?? 0))
+            let employee = Employee(name: cleanName, email: cleanEmail, businessCode: businessCode, commissionPercentage: commission)
             modelContext.insert(employee)
             try modelContext.save()
 
@@ -1639,6 +1738,7 @@ struct EmployeeManagerSheet: View {
             generatedInviteEmail = cleanEmail
             newEmployeeName = ""
             newEmployeeEmail = ""
+            newEmployeeCommission = ""
         } catch {
             generatedInviteError = error.localizedDescription
         }
@@ -1890,6 +1990,9 @@ struct BusinessProfileSheet: View {
     @State private var website = ""
     @State private var about = ""
     @State private var businessCategory = ""
+    @State private var requiresDeposit = false
+    @State private var depositPercentage = ""
+    @State private var employeesKeepOwnClientProfits = false
     @State private var mondayHours = "9:00 AM – 6:00 PM"
     @State private var tuesdayHours = "9:00 AM – 6:00 PM"
     @State private var wednesdayHours = "9:00 AM – 6:00 PM"
@@ -1947,6 +2050,31 @@ struct BusinessProfileSheet: View {
                     ProfileField(icon: "envelope", placeholder: "Business email", text: $email)
                     ProfileField(icon: "globe", placeholder: "Website (optional)", text: $website)
                 }
+
+                Section(header: Label("Deposits", systemImage: "creditcard")) {
+                    Toggle("Require appointment deposits", isOn: $requiresDeposit)
+                        .tint(.teal)
+
+                    if requiresDeposit {
+                        HStack(spacing: 10) {
+                            Image(systemName: "percent").foregroundColor(.teal).frame(width: 18)
+                            TextField("Deposit percentage", text: $depositPercentage)
+                                .keyboardType(.decimalPad)
+                        }
+
+                        Text("Clients pay this percentage of the service price when booking. If they cancel within 24 hours of the appointment, the deposit is retained and only the remaining paid amount is refunded.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Section(header: Label("Employee Earnings", systemImage: "dollarsign.circle")) {
+                    Toggle("Employees keep profits from their own clients", isOn: $employeesKeepOwnClientProfits)
+                        .tint(.teal)
+                    Text("When this is off, employee earnings are calculated from each staff member's commission percentage in Staff Management. Marking employees paid in Revenue Reports records payout status only; Stripe Connect is required for automatic bank payouts.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
                 
                 Section(header: Label("Hours of Operation", systemImage: "clock")) {
                     HoursRow(day: "Monday",    hours: $mondayHours)
@@ -1986,6 +2114,9 @@ struct BusinessProfileSheet: View {
         guard let p = existingProfile else { return }
         studioName = p.studioName; address = p.address; city = p.city; state = p.state; zipCode = p.zipCode
         phone = p.phone; email = p.email; website = p.website; about = p.about; businessCategory = p.businessCategory
+        requiresDeposit = p.requiresDeposit
+        depositPercentage = p.depositPercentage > 0 ? String(format: "%.0f", p.depositPercentage) : ""
+        employeesKeepOwnClientProfits = p.employeesKeepOwnClientProfits
         mondayHours = p.mondayHours; tuesdayHours = p.tuesdayHours; wednesdayHours = p.wednesdayHours
         thursdayHours = p.thursdayHours; fridayHours = p.fridayHours; saturdayHours = p.saturdayHours; sundayHours = p.sundayHours
     }
@@ -2002,6 +2133,9 @@ struct BusinessProfileSheet: View {
         profile.studioName = studioName; profile.address = address; profile.city = city; profile.state = state
         profile.zipCode = zipCode; profile.phone = phone; profile.email = email; profile.website = website
         profile.about = about; profile.businessCategory = businessCategory
+        profile.requiresDeposit = requiresDeposit
+        profile.depositPercentage = requiresDeposit ? min(100, max(0, Double(depositPercentage) ?? 0)) : 0
+        profile.employeesKeepOwnClientProfits = employeesKeepOwnClientProfits
         profile.mondayHours = mondayHours; profile.tuesdayHours = tuesdayHours; profile.wednesdayHours = wednesdayHours
         profile.thursdayHours = thursdayHours; profile.fridayHours = fridayHours
         profile.saturdayHours = saturdayHours; profile.sundayHours = sundayHours
