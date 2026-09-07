@@ -2071,7 +2071,7 @@ struct BusinessProfileSheet: View {
                 Section(header: Label("Employee Earnings", systemImage: "dollarsign.circle")) {
                     Toggle("Employees keep profits from their own clients", isOn: $employeesKeepOwnClientProfits)
                         .tint(.teal)
-                    Text("When this is off, employee earnings are calculated from each staff member's commission percentage in Staff Management. Marking employees paid in Revenue Reports records payout status only; Stripe Connect is required for automatic bank payouts.")
+                    Text("When this is off, employee earnings are calculated from each staff member's commission percentage in Staff Management. Marking employees paid in Revenue Reports records payout status only. Actual employee payments must be handled outside Pianivo.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
