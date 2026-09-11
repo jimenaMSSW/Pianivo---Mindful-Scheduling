@@ -2052,11 +2052,13 @@ struct BusinessProfileSheet: View {
     }
 
     private var businessServices: [Service] {
-        allServices.filter { $0.businessCode == (businessCode.isEmpty ? existingProfile?.businessCode ?? "" : businessCode) }
+        let targetCode = businessCode.isEmpty ? existingProfile?.businessCode ?? "" : businessCode
+        return allServices.filter { businessCodesMatch($0.businessCode, targetCode) }
     }
 
     private var businessEmployees: [Employee] {
-        allEmployees.filter { $0.businessCode == (businessCode.isEmpty ? existingProfile?.businessCode ?? "" : businessCode) }
+        let targetCode = businessCode.isEmpty ? existingProfile?.businessCode ?? "" : businessCode
+        return allEmployees.filter { businessCodesMatch($0.businessCode, targetCode) }
     }
     
     var body: some View {
@@ -2194,6 +2196,11 @@ struct BusinessProfileSheet: View {
         }
         withAnimation { saved = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { withAnimation { saved = false } }
+    }
+
+    private func businessCodesMatch(_ lhs: String, _ rhs: String) -> Bool {
+        lhs.trimmingCharacters(in: .whitespacesAndNewlines)
+            .caseInsensitiveCompare(rhs.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame
     }
 }
 

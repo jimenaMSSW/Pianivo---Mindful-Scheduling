@@ -1784,7 +1784,7 @@ struct BusinessDirectorySyncService {
     private static let collectionName = "businessDirectory"
 
     static func publish(profile: BusinessProfile, services: [Service], employees: [Employee]) async throws {
-        let businessCode = profile.businessCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let businessCode = cleanCode(profile.businessCode)
         guard !businessCode.isEmpty, !profile.studioName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
         let businessData: [String: Any] = [
@@ -1816,7 +1816,7 @@ struct BusinessDirectorySyncService {
         let businessRef = db.collection(collectionName).document(businessCode)
         try await setFirestoreData(businessData, at: businessRef)
 
-        for service in services where service.businessCode == businessCode {
+        for service in services where codesMatch(service.businessCode, businessCode) {
             let data: [String: Any] = [
                 "name": service.name,
                 "price": service.price,
@@ -1829,7 +1829,7 @@ struct BusinessDirectorySyncService {
             try await setFirestoreData(data, at: businessRef.collection("services").document(documentID(for: service.name)))
         }
 
-        for employee in employees where employee.businessCode == businessCode {
+        for employee in employees where codesMatch(employee.businessCode, businessCode) {
             let stableKey = employee.email.isEmpty ? employee.name : employee.email
             let data: [String: Any] = [
                 "name": employee.name,
@@ -1853,10 +1853,9 @@ struct BusinessDirectorySyncService {
                 let data = document.data()
                 guard let businessCode = (data["businessCode"] as? String ?? document.documentID)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .nilIfEmpty?
-                    .uppercased() else { continue }
+                    .nilIfEmpty else { continue }
 
-                let profile = existingProfiles.first { $0.businessCode == businessCode } ?? BusinessProfile(businessCode: businessCode)
+                let profile = existingProfiles.first { codesMatch($0.businessCode, businessCode) } ?? BusinessProfile(businessCode: businessCode)
                 if profile.modelContext == nil {
                     modelContext.insert(profile)
                 }
@@ -1866,7 +1865,7 @@ struct BusinessDirectorySyncService {
                 for serviceDocument in servicesSnapshot.documents {
                     let serviceData = serviceDocument.data()
                     guard let name = (serviceData["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { continue }
-                    let service = existingServices.first { $0.businessCode == businessCode && $0.name.caseInsensitiveCompare(name) == .orderedSame }
+                    let service = existingServices.first { codesMatch($0.businessCode, businessCode) && $0.name.caseInsensitiveCompare(name) == .orderedSame }
                         ?? Service(name: name, price: 0, businessCode: businessCode)
                     if service.modelContext == nil {
                         modelContext.insert(service)
@@ -1886,7 +1885,7 @@ struct BusinessDirectorySyncService {
                     guard let name = (employeeData["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { continue }
                     let email = employeeData["email"] as? String ?? ""
                     let employee = existingEmployees.first {
-                        $0.businessCode == businessCode &&
+                        codesMatch($0.businessCode, businessCode) &&
                         ((!email.isEmpty && $0.email.caseInsensitiveCompare(email) == .orderedSame) || $0.name.caseInsensitiveCompare(name) == .orderedSame)
                     } ?? Employee(name: name, email: email, businessCode: businessCode)
                     if employee.modelContext == nil {
@@ -1958,6 +1957,14 @@ struct BusinessDirectorySyncService {
     private static func documentID(for value: String) -> String {
         let cleaned = value.lowercased().filter { $0.isLetter || $0.isNumber }
         return cleaned.isEmpty ? UUID().uuidString : cleaned
+    }
+
+    private static func cleanCode(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func codesMatch(_ lhs: String, _ rhs: String) -> Bool {
+        cleanCode(lhs).caseInsensitiveCompare(cleanCode(rhs)) == .orderedSame
     }
 }
 

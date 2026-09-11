@@ -18,8 +18,8 @@ let package = Package(
             targets: ["AppModule"],
             bundleIdentifier: "com.pianivo.mindfulscheduling",
             teamIdentifier: "D345267D4X",
-            displayVersion: "1.0",
-            bundleVersion: "1",
+            displayVersion: "1.1",
+            bundleVersion: "2",
             appIcon: .asset("AppIcon"),
             accentColor: .presetColor(.mint),
             supportedDeviceFamilies: [
