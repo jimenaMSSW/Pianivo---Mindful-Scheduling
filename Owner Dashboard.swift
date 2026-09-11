@@ -1402,6 +1402,8 @@ struct ServiceManagerSheet: View {
     let businessCode: String
     
     @Query(sort: \Service.name) private var allServices: [Service]
+    @Query private var profiles: [BusinessProfile]
+    @Query(sort: \Employee.name) private var allEmployees: [Employee]
     
     @State private var serviceName = ""
     @State private var servicePrice: Double? = nil
@@ -1416,6 +1418,14 @@ struct ServiceManagerSheet: View {
     /// Only show services for THIS business
     private var services: [Service] {
         businessCode.isEmpty ? allServices : allServices.filter { $0.businessCode == businessCode }
+    }
+
+    private var employees: [Employee] {
+        businessCode.isEmpty ? allEmployees : allEmployees.filter { $0.businessCode == businessCode }
+    }
+
+    private var profile: BusinessProfile? {
+        profiles.first { $0.businessCode == businessCode }
     }
     
     var body: some View {
@@ -1515,11 +1525,24 @@ struct ServiceManagerSheet: View {
             serviceDescription: serviceDescription, category: category
         )
         modelContext.insert(newService)
+        try? modelContext.save()
+        if let profile {
+            let updatedServices = services.contains(where: { $0 === newService }) ? services : services + [newService]
+            Task {
+                try? await BusinessDirectorySyncService.publish(profile: profile, services: updatedServices, employees: employees)
+            }
+        }
         serviceName = ""; servicePrice = nil; serviceDescription = ""; category = ""
     }
     
     private func deleteService(at offsets: IndexSet) {
         for index in offsets { modelContext.delete(services[index]) }
+        try? modelContext.save()
+        if let profile {
+            Task {
+                try? await BusinessDirectorySyncService.publish(profile: profile, services: services, employees: employees)
+            }
+        }
     }
 }
 
@@ -1545,6 +1568,10 @@ struct EmployeeManagerSheet: View {
     
     /// Studio name from profile
     private var studioName: String { profiles.first?.studioName ?? "Our Studio" }
+
+    private var businessProfile: BusinessProfile? {
+        profiles.first { $0.businessCode == businessCode }
+    }
     
     /// Only employees in this business
     private var employees: [Employee] {
@@ -1733,6 +1760,12 @@ struct EmployeeManagerSheet: View {
             let employee = Employee(name: cleanName, email: cleanEmail, businessCode: businessCode, commissionPercentage: commission)
             modelContext.insert(employee)
             try modelContext.save()
+            if let businessProfile {
+                let updatedEmployees = employees.contains(where: { $0 === employee }) ? employees : employees + [employee]
+                Task {
+                    try? await BusinessDirectorySyncService.publish(profile: businessProfile, services: [], employees: updatedEmployees)
+                }
+            }
 
             generatedInviteToken = token
             generatedInviteEmail = cleanEmail
@@ -1748,6 +1781,12 @@ struct EmployeeManagerSheet: View {
     
     private func deleteEmployees(at offsets: IndexSet) {
         for index in offsets { modelContext.delete(employees[index]) }
+        try? modelContext.save()
+        if let businessProfile {
+            Task {
+                try? await BusinessDirectorySyncService.publish(profile: businessProfile, services: [], employees: employees)
+            }
+        }
     }
 }
 
@@ -1977,6 +2016,8 @@ struct BusinessProfileSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Query private var profiles: [BusinessProfile]
+    @Query(sort: \Service.name) private var allServices: [Service]
+    @Query(sort: \Employee.name) private var allEmployees: [Employee]
 
     let businessCode: String
     
@@ -2008,6 +2049,14 @@ struct BusinessProfileSheet: View {
             return profiles.first { $0.businessCode == businessCode }
         }
         return profiles.first
+    }
+
+    private var businessServices: [Service] {
+        allServices.filter { $0.businessCode == (businessCode.isEmpty ? existingProfile?.businessCode ?? "" : businessCode) }
+    }
+
+    private var businessEmployees: [Employee] {
+        allEmployees.filter { $0.businessCode == (businessCode.isEmpty ? existingProfile?.businessCode ?? "" : businessCode) }
     }
     
     var body: some View {
@@ -2140,6 +2189,9 @@ struct BusinessProfileSheet: View {
         profile.thursdayHours = thursdayHours; profile.fridayHours = fridayHours
         profile.saturdayHours = saturdayHours; profile.sundayHours = sundayHours
         try? modelContext.save()
+        Task {
+            try? await BusinessDirectorySyncService.publish(profile: profile, services: businessServices, employees: businessEmployees)
+        }
         withAnimation { saved = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { withAnimation { saved = false } }
     }

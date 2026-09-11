@@ -1780,6 +1780,193 @@ struct PianivoRootView: View {
     }
 }
 
+struct BusinessDirectorySyncService {
+    private static let collectionName = "businessDirectory"
+
+    static func publish(profile: BusinessProfile, services: [Service], employees: [Employee]) async throws {
+        let businessCode = profile.businessCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !businessCode.isEmpty, !profile.studioName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        let businessData: [String: Any] = [
+            "businessCode": businessCode,
+            "studioName": profile.studioName,
+            "address": profile.address,
+            "city": profile.city,
+            "state": profile.state,
+            "zipCode": profile.zipCode,
+            "phone": profile.phone,
+            "email": profile.email,
+            "website": profile.website,
+            "about": profile.about,
+            "businessCategory": profile.businessCategory,
+            "requiresDeposit": profile.requiresDeposit,
+            "depositPercentage": profile.depositPercentage,
+            "employeesKeepOwnClientProfits": profile.employeesKeepOwnClientProfits,
+            "mondayHours": profile.mondayHours,
+            "tuesdayHours": profile.tuesdayHours,
+            "wednesdayHours": profile.wednesdayHours,
+            "thursdayHours": profile.thursdayHours,
+            "fridayHours": profile.fridayHours,
+            "saturdayHours": profile.saturdayHours,
+            "sundayHours": profile.sundayHours,
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+
+        let db = Firestore.firestore()
+        let businessRef = db.collection(collectionName).document(businessCode)
+        try await setFirestoreData(businessData, at: businessRef)
+
+        for service in services where service.businessCode == businessCode {
+            let data: [String: Any] = [
+                "name": service.name,
+                "price": service.price,
+                "colorHex": service.colorHex,
+                "durationMinutes": service.durationMinutes,
+                "serviceDescription": service.serviceDescription,
+                "category": service.category,
+                "businessCode": businessCode
+            ]
+            try await setFirestoreData(data, at: businessRef.collection("services").document(documentID(for: service.name)))
+        }
+
+        for employee in employees where employee.businessCode == businessCode {
+            let stableKey = employee.email.isEmpty ? employee.name : employee.email
+            let data: [String: Any] = [
+                "name": employee.name,
+                "commissionPercentage": employee.commissionPercentage,
+                "businessCode": businessCode
+            ]
+            try await setFirestoreData(data, at: businessRef.collection("employees").document(documentID(for: stableKey)))
+        }
+    }
+
+    @MainActor
+    static func fetchPublicDirectory(
+        into modelContext: ModelContext,
+        existingProfiles: [BusinessProfile],
+        existingServices: [Service],
+        existingEmployees: [Employee]
+    ) async {
+        do {
+            let snapshot = try await getFirestoreDocuments(from: Firestore.firestore().collection(collectionName))
+            for document in snapshot.documents {
+                let data = document.data()
+                guard let businessCode = (data["businessCode"] as? String ?? document.documentID)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .nilIfEmpty?
+                    .uppercased() else { continue }
+
+                let profile = existingProfiles.first { $0.businessCode == businessCode } ?? BusinessProfile(businessCode: businessCode)
+                if profile.modelContext == nil {
+                    modelContext.insert(profile)
+                }
+                applyBusinessData(data, to: profile, businessCode: businessCode)
+
+                let servicesSnapshot = try await getFirestoreDocuments(from: document.reference.collection("services"))
+                for serviceDocument in servicesSnapshot.documents {
+                    let serviceData = serviceDocument.data()
+                    guard let name = (serviceData["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { continue }
+                    let service = existingServices.first { $0.businessCode == businessCode && $0.name.caseInsensitiveCompare(name) == .orderedSame }
+                        ?? Service(name: name, price: 0, businessCode: businessCode)
+                    if service.modelContext == nil {
+                        modelContext.insert(service)
+                    }
+                    service.name = name
+                    service.price = serviceData["price"] as? Double ?? service.price
+                    service.colorHex = serviceData["colorHex"] as? String ?? service.colorHex
+                    service.durationMinutes = serviceData["durationMinutes"] as? Int ?? service.durationMinutes
+                    service.serviceDescription = serviceData["serviceDescription"] as? String ?? service.serviceDescription
+                    service.category = serviceData["category"] as? String ?? service.category
+                    service.businessCode = businessCode
+                }
+
+                let employeesSnapshot = try await getFirestoreDocuments(from: document.reference.collection("employees"))
+                for employeeDocument in employeesSnapshot.documents {
+                    let employeeData = employeeDocument.data()
+                    guard let name = (employeeData["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { continue }
+                    let email = employeeData["email"] as? String ?? ""
+                    let employee = existingEmployees.first {
+                        $0.businessCode == businessCode &&
+                        ((!email.isEmpty && $0.email.caseInsensitiveCompare(email) == .orderedSame) || $0.name.caseInsensitiveCompare(name) == .orderedSame)
+                    } ?? Employee(name: name, email: email, businessCode: businessCode)
+                    if employee.modelContext == nil {
+                        modelContext.insert(employee)
+                    }
+                    employee.name = name
+                    employee.email = email
+                    employee.commissionPercentage = employeeData["commissionPercentage"] as? Double ?? employee.commissionPercentage
+                    employee.businessCode = businessCode
+                }
+            }
+
+            try? modelContext.save()
+        } catch {
+            print("Business directory sync failed: \(error.localizedDescription)")
+        }
+    }
+
+    private static func applyBusinessData(_ data: [String: Any], to profile: BusinessProfile, businessCode: String) {
+        profile.businessCode = businessCode
+        profile.studioName = data["studioName"] as? String ?? profile.studioName
+        profile.address = data["address"] as? String ?? profile.address
+        profile.city = data["city"] as? String ?? profile.city
+        profile.state = data["state"] as? String ?? profile.state
+        profile.zipCode = data["zipCode"] as? String ?? profile.zipCode
+        profile.phone = data["phone"] as? String ?? profile.phone
+        profile.email = data["email"] as? String ?? profile.email
+        profile.website = data["website"] as? String ?? profile.website
+        profile.about = data["about"] as? String ?? profile.about
+        profile.businessCategory = data["businessCategory"] as? String ?? profile.businessCategory
+        profile.requiresDeposit = data["requiresDeposit"] as? Bool ?? profile.requiresDeposit
+        profile.depositPercentage = data["depositPercentage"] as? Double ?? profile.depositPercentage
+        profile.employeesKeepOwnClientProfits = data["employeesKeepOwnClientProfits"] as? Bool ?? profile.employeesKeepOwnClientProfits
+        profile.mondayHours = data["mondayHours"] as? String ?? profile.mondayHours
+        profile.tuesdayHours = data["tuesdayHours"] as? String ?? profile.tuesdayHours
+        profile.wednesdayHours = data["wednesdayHours"] as? String ?? profile.wednesdayHours
+        profile.thursdayHours = data["thursdayHours"] as? String ?? profile.thursdayHours
+        profile.fridayHours = data["fridayHours"] as? String ?? profile.fridayHours
+        profile.saturdayHours = data["saturdayHours"] as? String ?? profile.saturdayHours
+        profile.sundayHours = data["sundayHours"] as? String ?? profile.sundayHours
+    }
+
+    private static func setFirestoreData(_ data: [String: Any], at reference: DocumentReference) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            reference.setData(data, merge: true) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            }
+        }
+    }
+
+    private static func getFirestoreDocuments(from query: FirebaseFirestore.Query) async throws -> QuerySnapshot {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<QuerySnapshot, Error>) in
+            query.getDocuments { snapshot, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let snapshot {
+                    continuation.resume(returning: snapshot)
+                } else {
+                    continuation.resume(throwing: BackendAPIError.invalidResponse)
+                }
+            }
+        }
+    }
+
+    private static func documentID(for value: String) -> String {
+        let cleaned = value.lowercased().filter { $0.isLetter || $0.isNumber }
+        return cleaned.isEmpty ? UUID().uuidString : cleaned
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
+}
+
 // MARK: - UTILITIES
 
 extension Color {

@@ -493,6 +493,8 @@ struct ClientDashboardView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Appointment.startTime, order: .forward) private var allAppointments: [Appointment]
     @Query private var allBusinesses: [BusinessProfile]
+    @Query(sort: \Service.name) private var allServices: [Service]
+    @Query(sort: \Employee.name) private var allEmployees: [Employee]
     
     @State private var rescheduleAppt: Appointment? = nil
     @State private var showCancelConfirm = false
@@ -587,6 +589,14 @@ struct ClientDashboardView: View {
         }
         .navigationTitle("Dashboard")
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await BusinessDirectorySyncService.fetchPublicDirectory(
+                into: modelContext,
+                existingProfiles: allBusinesses,
+                existingServices: allServices,
+                existingEmployees: allEmployees
+            )
+        }
         .sheet(item: $rescheduleAppt) { appt in
             RescheduleSheetView(appointment: appt)
         }
@@ -838,8 +848,10 @@ struct ClientBusinessChip: View {
 
 struct ClientDiscoverView: View {
     let clientName: String
+    @Environment(\.modelContext) private var modelContext
     @Query private var allBusinesses: [BusinessProfile]
     @Query(sort: \Service.name) private var allServices: [Service]
+    @Query(sort: \Employee.name) private var allEmployees: [Employee]
     @Query private var allReviews: [Review]
     
     @State private var searchText = ""
@@ -921,6 +933,14 @@ struct ClientDiscoverView: View {
         }
         .navigationTitle("Discover")
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await BusinessDirectorySyncService.fetchPublicDirectory(
+                into: modelContext,
+                existingProfiles: allBusinesses,
+                existingServices: allServices,
+                existingEmployees: allEmployees
+            )
+        }
     }
 }
 
