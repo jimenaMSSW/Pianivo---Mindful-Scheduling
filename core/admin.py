@@ -3,7 +3,7 @@ from django.utils import timezone
 from django.utils.html import format_html
 from django.urls import path
 from django.shortcuts import redirect, get_object_or_404
-from .models import AppNotification, Appointment, Business, Employee, Payment, WaitlistEntry
+from .models import AppNotification, Appointment, Business, Employee, Payment, PaymentAccount, WaitlistEntry
 
 @admin.register(Appointment)
 class AppointmentAdmin(admin.ModelAdmin):
@@ -102,6 +102,20 @@ class PaymentAdmin(admin.ModelAdmin):
     list_filter = ("status", "refund_status", "payout_status", "business", "created_at")
     search_fields = ("customer_name", "customer_email", "stripe_payment_intent_id")
     readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(PaymentAccount)
+class PaymentAccountAdmin(admin.ModelAdmin):
+    list_display = (
+        "business",
+        "stripe_account_id",
+        "charges_enabled",
+        "payouts_enabled",
+        "details_submitted",
+        "updated_at",
+    )
+    list_filter = ("charges_enabled", "payouts_enabled", "details_submitted")
+    search_fields = ("business__name", "stripe_account_id")
 
 
 @admin.register(Employee)

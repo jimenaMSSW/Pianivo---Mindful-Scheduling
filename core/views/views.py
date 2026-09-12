@@ -14,7 +14,7 @@ from django.core.exceptions import PermissionDenied, ImproperlyConfigured
 from django_ratelimit.decorators import ratelimit
 
 from core.firebase import firebase_status
-from core.models import AppNotification, Business, Appointment, Employee, Conversation, Message, Payment, OwnerSubscription, WaitlistEntry
+from core.models import AppNotification, Business, Appointment, Employee, Conversation, Message, Payment, PaymentAccount, OwnerSubscription, WaitlistEntry
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +114,17 @@ def deposit_policy_for_request(business, data):
     amount_to_charge = deposit_amount if deposit_enabled and deposit_amount > 0 else service_total_amount
 
     return service_total_amount, amount_to_charge, deposit_amount
+
+def connected_stripe_account_for_business(business):
+    try:
+        payment_account = business.payment_account
+    except PaymentAccount.DoesNotExist:
+        return None
+
+    if not payment_account.stripe_account_id or not payment_account.charges_enabled:
+        return None
+
+    return payment_account.stripe_account_id
 
 def employee_from_request(business, data):
     employee_id = data.get("employee_id")
@@ -353,6 +364,12 @@ def create_payment_intent(request):
         if business is None:
             return JsonResponse({"error": "No business is configured yet."}, status=404)
 
+        owner_stripe_account_id = connected_stripe_account_for_business(business)
+        if not owner_stripe_account_id:
+            return JsonResponse({
+                "error": "This business has not connected Stripe payouts yet. Please contact the business owner."
+            }, status=400)
+
         customer_name = data.get("customer_name", "").strip()
         customer_email = data.get("customer_email", "").strip() or None
         if not customer_name:
@@ -401,6 +418,9 @@ def create_payment_intent(request):
             currency=settings.STRIPE_CURRENCY,
             payment_method_types=["card", "klarna"],
             receipt_email=customer_email,
+            transfer_data={
+                "destination": owner_stripe_account_id,
+            },
             metadata={
                 "business_id": str(business.id),
                 "appointment_id": str(appointment.id) if appointment else "",
