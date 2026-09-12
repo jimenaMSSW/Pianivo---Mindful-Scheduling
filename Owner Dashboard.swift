@@ -18,6 +18,7 @@ struct OwnerDashboard: View {
     
     @Query(sort: \Appointment.startTime) private var allAppointments: [Appointment]
     @Query(sort: \Employee.name) private var allEmployees: [Employee]
+    @Query(sort: \Service.name) private var allServices: [Service]
     @Query private var loggedInUsers: [User]
     @Query private var profiles: [BusinessProfile]
     
@@ -203,6 +204,14 @@ struct OwnerDashboard: View {
                     Button("Cancel", role: .cancel) { appointmentToDelete = nil }
                 } message: { appt in
                     Text("Are you sure you want to delete the appointment for \(appt.customerName)?")
+                }
+                .task {
+                    await BusinessDirectorySyncService.fetchPublicDirectory(
+                        into: modelContext,
+                        existingProfiles: profiles,
+                        existingServices: allServices,
+                        existingEmployees: allEmployees
+                    )
                 }
             }
             
@@ -2158,6 +2167,15 @@ struct BusinessProfileSheet: View {
             .navigationTitle("Business Profile").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .onAppear { loadProfile() }
+            .task {
+                await BusinessDirectorySyncService.fetchPublicDirectory(
+                    into: modelContext,
+                    existingProfiles: profiles,
+                    existingServices: allServices,
+                    existingEmployees: allEmployees
+                )
+                loadProfile()
+            }
         }
     }
     
