@@ -230,13 +230,17 @@ func addAppNotification(
     title: String,
     message: String
 ) {
-    modelContext.insert(AppNotification(
+    let notification = AppNotification(
         audience: audience,
         recipientName: recipientName,
         businessCode: businessCode,
         title: title,
         message: message
-    ))
+    )
+    modelContext.insert(notification)
+    Task {
+        await AppLiveSyncService.publishNotification(notification)
+    }
 }
 
 // Returns first letter of word 1 + first letter of word 2 (falls back to first 2 chars)
@@ -689,6 +693,7 @@ struct ClientDashboardView: View {
             appt.status = .cancelled
             AppointmentReminderScheduler.cancelReminder(for: appt)
             try modelContext.save()
+            await AppLiveSyncService.publishAppointment(appt)
         } catch {
             cancellationErrorMessage = error.localizedDescription
         }
@@ -1225,6 +1230,9 @@ struct BusinessDetailView: View {
             message: "\(appointment.customerName) booked \(service.name). \(AppointmentPaymentSummary.paymentLines(for: appointment).joined(separator: ", "))"
         )
         try? modelContext.save()
+        Task {
+            await AppLiveSyncService.publishAppointment(appointment)
+        }
         AppointmentReminderScheduler.scheduleTomorrowReminder(for: appointment, businessName: business.studioName)
     }
     
@@ -1667,6 +1675,9 @@ struct ClientBookingSheet: View {
             message: "\(contactName) booked \(service.name) for \(appointmentDate.formatted(date: .abbreviated, time: .shortened))."
         )
         try? modelContext.save()
+        Task {
+            await AppLiveSyncService.publishAppointment(appt)
+        }
         AppointmentReminderScheduler.scheduleTomorrowReminder(for: appt, businessName: business.studioName)
         isSaved = true
         withAnimation { showConfirmation = true }
@@ -1699,6 +1710,9 @@ struct ClientBookingSheet: View {
             message: "You joined the waitlist for \(service.name) at \(business.studioName)."
         )
         try? modelContext.save()
+        Task {
+            await AppLiveSyncService.publishWaitlistEntry(entry)
+        }
         isSaved = true
         showWaitlistConfirmation = true
     }
@@ -2032,6 +2046,9 @@ struct LeaveReviewSheet: View {
                             stars: selectedStars, comment: comment)
         modelContext.insert(review)
         try? modelContext.save()
+        Task {
+            await AppLiveSyncService.publishReview(review)
+        }
         isSaved = true
         dismiss()
     }

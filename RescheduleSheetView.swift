@@ -53,6 +53,9 @@ struct RescheduleSheetView: View {
                             message: "\(appointment.service?.name ?? "Appointment") was moved to \(appointment.startTime.formatted(date: .abbreviated, time: .shortened)). Payment/deposit remains attached."
                         )
                         try? modelContext.save()
+                        Task {
+                            await AppLiveSyncService.publishAppointment(appointment)
+                        }
                         dismiss()
                     }
                 }

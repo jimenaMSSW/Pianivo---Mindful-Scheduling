@@ -200,7 +200,13 @@ struct OwnerDashboard: View {
                     RevenueReportShareSheet(url: file.url)
                 }
                 .alert("Delete Appointment?", isPresented: $isShowingDeleteAlert, presenting: appointmentToDelete) { appt in
-                    Button("Delete", role: .destructive) { modelContext.delete(appt) }
+                    Button("Delete", role: .destructive) {
+                        modelContext.delete(appt)
+                        try? modelContext.save()
+                        Task {
+                            await AppLiveSyncService.deleteAppointment(appt)
+                        }
+                    }
                     Button("Cancel", role: .cancel) { appointmentToDelete = nil }
                 } message: { appt in
                     Text("Are you sure you want to delete the appointment for \(appt.customerName)?")
@@ -493,6 +499,9 @@ struct OwnerDashboard: View {
                                     appt.employeeEarningsCents = Int((employeeEarnings(for: appt) * 100).rounded())
                                     appt.payoutStatus = appt.payoutStatus == "paid" ? "unpaid" : "paid"
                                     try? modelContext.save()
+                                    Task {
+                                        await AppLiveSyncService.publishAppointment(appt)
+                                    }
                                 }
                                 .font(.caption2.bold())
                                 .foregroundColor(.teal)
@@ -1301,6 +1310,9 @@ struct AddAppointmentSheet: View {
         newAppt.service = service
         modelContext.insert(newAppt)
         try? modelContext.save()
+        Task {
+            await AppLiveSyncService.publishAppointment(newAppt)
+        }
         AppointmentReminderScheduler.scheduleTomorrowReminder(for: newAppt)
         dismiss()
     }
@@ -1383,6 +1395,9 @@ struct ModernChatView: View {
         guard !trimmed.isEmpty else { return }
         let msg = OwnerClientMessage(content: trimmed, isFromOwner: true, clientName: appointment.customerName)
         modelContext.insert(msg); try? modelContext.save(); newMessageText = ""
+        Task {
+            await AppLiveSyncService.publishOwnerMessage(msg, businessCode: appointment.businessCode, appointmentID: appointment.id)
+        }
     }
 }
 
@@ -1545,11 +1560,18 @@ struct ServiceManagerSheet: View {
     }
     
     private func deleteService(at offsets: IndexSet) {
-        for index in offsets { modelContext.delete(services[index]) }
+        let removedServices = offsets.map { services[$0] }
+        for service in removedServices { modelContext.delete(service) }
         try? modelContext.save()
         if let profile {
             Task {
-                try? await BusinessDirectorySyncService.publish(profile: profile, services: services, employees: employees)
+                for service in removedServices {
+                    await BusinessDirectorySyncService.deleteService(service, businessCode: businessCode)
+                }
+                let remainingServices = services.filter { service in
+                    !removedServices.contains { $0.id == service.id }
+                }
+                try? await BusinessDirectorySyncService.publish(profile: profile, services: remainingServices, employees: employees)
             }
         }
     }
@@ -1564,6 +1586,7 @@ struct EmployeeManagerSheet: View {
     let businessCode: String
     
     @Query(sort: \Employee.name) private var allEmployees: [Employee]
+    @Query(sort: \Service.name) private var allServices: [Service]
     @Query private var profiles: [BusinessProfile]
     
     @State private var newEmployeeName = ""
@@ -1585,6 +1608,10 @@ struct EmployeeManagerSheet: View {
     /// Only employees in this business
     private var employees: [Employee] {
         businessCode.isEmpty ? allEmployees : allEmployees.filter { $0.businessCode == businessCode }
+    }
+
+    private var services: [Service] {
+        businessCode.isEmpty ? allServices : allServices.filter { $0.businessCode == businessCode }
     }
     
     var body: some View {
@@ -1713,6 +1740,11 @@ struct EmployeeManagerSheet: View {
                                 Button {
                                     employee.commissionPercentage = min(100, employee.commissionPercentage + 5)
                                     try? modelContext.save()
+                                    if let businessProfile {
+                                        Task {
+                                            try? await BusinessDirectorySyncService.publish(profile: businessProfile, services: services, employees: employees)
+                                        }
+                                    }
                                 } label: {
                                     Image(systemName: "plus.circle")
                                 }
@@ -1720,6 +1752,11 @@ struct EmployeeManagerSheet: View {
                                 Button {
                                     employee.commissionPercentage = max(0, employee.commissionPercentage - 5)
                                     try? modelContext.save()
+                                    if let businessProfile {
+                                        Task {
+                                            try? await BusinessDirectorySyncService.publish(profile: businessProfile, services: services, employees: employees)
+                                        }
+                                    }
                                 } label: {
                                     Image(systemName: "minus.circle")
                                 }
@@ -1772,7 +1809,7 @@ struct EmployeeManagerSheet: View {
             if let businessProfile {
                 let updatedEmployees = employees.contains(where: { $0 === employee }) ? employees : employees + [employee]
                 Task {
-                    try? await BusinessDirectorySyncService.publish(profile: businessProfile, services: [], employees: updatedEmployees)
+                    try? await BusinessDirectorySyncService.publish(profile: businessProfile, services: services, employees: updatedEmployees)
                 }
             }
 
@@ -1789,11 +1826,18 @@ struct EmployeeManagerSheet: View {
     }
     
     private func deleteEmployees(at offsets: IndexSet) {
-        for index in offsets { modelContext.delete(employees[index]) }
+        let removedEmployees = offsets.map { employees[$0] }
+        for employee in removedEmployees { modelContext.delete(employee) }
         try? modelContext.save()
         if let businessProfile {
             Task {
-                try? await BusinessDirectorySyncService.publish(profile: businessProfile, services: [], employees: employees)
+                for employee in removedEmployees {
+                    await BusinessDirectorySyncService.deleteEmployee(employee, businessCode: businessCode)
+                }
+                let remainingEmployees = employees.filter { employee in
+                    !removedEmployees.contains { $0.id == employee.id }
+                }
+                try? await BusinessDirectorySyncService.publish(profile: businessProfile, services: services, employees: remainingEmployees)
             }
         }
     }

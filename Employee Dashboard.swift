@@ -128,7 +128,7 @@ struct EmployeeDashboard: View {
         }
         .sheet(item: $selectedApptForEdit) { appt in RescheduleSheetView(appointment: appt) }
         .sheet(isPresented: $isShowingMessages) {
-            EmployeeInboxView(employeeName: employeeName, allClientNames: Array(Set(myAppointments.map { $0.customerName })))
+            EmployeeInboxView(employeeName: employeeName, businessCode: businessCode, allClientNames: Array(Set(myAppointments.map { $0.customerName })))
         }
         .sheet(isPresented: $isShowingSupport) {
             SupportReportSheet(
@@ -776,7 +776,7 @@ struct AppointmentActionCard: View {
         }
         .sheet(isPresented: $showChat) {
             NavigationStack {
-                EmployeeChatView(employeeName: actorName, clientName: appt.customerName)
+                EmployeeChatView(employeeName: actorName, clientName: appt.customerName, businessCode: appt.businessCode)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) { Button("Done") { showChat = false } }
                     }
@@ -796,6 +796,9 @@ struct AppointmentActionCard: View {
                     message: "\(appt.service?.name ?? "Appointment") was confirmed for \(appt.startTime.formatted(date: .abbreviated, time: .shortened))."
                 )
                 try? modelContext.save()
+                Task {
+                    await AppLiveSyncService.publishAppointment(appt)
+                }
                 SoundFeedbackManager.shared.playAddTaskSound()
             }
             Button("Cancel", role: .cancel) {}
@@ -832,6 +835,9 @@ struct AppointmentActionCard: View {
                     message: "\(appt.service?.name ?? "Appointment") was marked completed."
                 )
                 try? modelContext.save()
+                Task {
+                    await AppLiveSyncService.publishAppointment(appt)
+                }
                 SoundFeedbackManager.shared.playCompleteTaskSound()
             }
             Button("Cancel", role: .cancel) {}
@@ -850,6 +856,9 @@ struct AppointmentActionCard: View {
                     message: "\(appt.customerName) was marked as a no-show for \(appt.service?.name ?? "Appointment")."
                 )
                 try? modelContext.save()
+                Task {
+                    await AppLiveSyncService.publishAppointment(appt)
+                }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -901,6 +910,7 @@ struct AppointmentActionCard: View {
                 message: AppointmentPaymentSummary.businessCancellationMessage(for: appt)
             )
             try modelContext.save()
+            await AppLiveSyncService.publishAppointment(appt)
         } catch {
             cancellationErrorMessage = error.localizedDescription
         }
@@ -998,6 +1008,9 @@ struct EmployeeAddAppointmentSheet: View {
                         let a = Appointment(customerName: customerName, employeeName: fixedEmployeeName,
                                             startTime: date, endTime: end, price: s.price, status: .confirmed, businessCode: businessCode)
                         a.service = s; modelContext.insert(a); try? modelContext.save()
+                        Task {
+                            await AppLiveSyncService.publishAppointment(a)
+                        }
                         AppointmentReminderScheduler.scheduleTomorrowReminder(for: a)
                         SoundFeedbackManager.shared.playAddTaskSound()
                         dismiss()
@@ -1050,6 +1063,7 @@ struct DashboardAppointmentBlock: View {
 
 struct EmployeeInboxView: View {
     let employeeName: String
+    let businessCode: String
     let allClientNames: [String]
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \EmployeeClientMessage.timestamp) private var allMessages: [EmployeeClientMessage]
@@ -1083,7 +1097,7 @@ struct EmployeeInboxView: View {
             .navigationTitle("Messages").navigationBarTitleDisplayMode(.large)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .navigationDestination(item: $openClientName) { name in
-                EmployeeChatView(employeeName: employeeName, clientName: name)
+                EmployeeChatView(employeeName: employeeName, clientName: name, businessCode: businessCode)
             }
         }
     }
@@ -1131,6 +1145,7 @@ struct ClientThreadRow: View {
 struct EmployeeChatView: View {
     let employeeName: String
     let clientName: String
+    let businessCode: String
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \EmployeeClientMessage.timestamp) private var allMessages: [EmployeeClientMessage]
     @State private var newMessage = ""
@@ -1167,8 +1182,12 @@ struct EmployeeChatView: View {
                 Button {
                     let t = newMessage.trimmingCharacters(in: .whitespaces)
                     guard !t.isEmpty else { return }
-                    modelContext.insert(EmployeeClientMessage(content: t, isFromEmployee: true, employeeName: employeeName, clientName: clientName))
+                    let message = EmployeeClientMessage(content: t, isFromEmployee: true, employeeName: employeeName, clientName: clientName)
+                    modelContext.insert(message)
                     try? modelContext.save(); newMessage = ""
+                    Task {
+                        await AppLiveSyncService.publishEmployeeMessage(message, businessCode: businessCode)
+                    }
                 } label: {
                     Image(systemName: "paperplane.fill").font(.title3)
                         .foregroundColor(newMessage.trimmingCharacters(in: .whitespaces).isEmpty ? .gray : .teal)

@@ -48,6 +48,9 @@ struct NotificationCenterListView: View {
                         Button(item.isRead ? "Unread" : "Read") {
                             item.isRead.toggle()
                             try? modelContext.save()
+                            Task {
+                                await AppLiveSyncService.publishNotification(item)
+                            }
                         }
                         .tint(.teal)
                     }
@@ -97,12 +100,18 @@ struct WaitlistManagerView: View {
                         Button("Contacted") {
                             entry.status = "Contacted"
                             try? modelContext.save()
+                            Task {
+                                await AppLiveSyncService.publishWaitlistEntry(entry)
+                            }
                         }
                         .tint(.teal)
 
                         Button("Remove", role: .destructive) {
                             modelContext.delete(entry)
                             try? modelContext.save()
+                            Task {
+                                await AppLiveSyncService.deleteWaitlistEntry(entry)
+                            }
                         }
                     }
                 }

@@ -196,6 +196,7 @@ final class Employee: Identifiable {
 
 @Model
 final class Appointment {
+    var id: UUID = UUID()
     var customerName: String
     var customerEmail: String = ""
     var employeeName: String
@@ -285,6 +286,7 @@ final class WaitlistEntry {
 
 @Model
 final class OwnerClientMessage {
+    var id: UUID = UUID()
     var content: String
     var timestamp: Date = Date()
     var isFromOwner: Bool
@@ -299,6 +301,7 @@ final class OwnerClientMessage {
 
 @Model
 final class EmployeeClientMessage {
+    var id: UUID = UUID()
     var content: String
     var timestamp: Date = Date()
     var isFromEmployee: Bool
@@ -1840,6 +1843,31 @@ struct BusinessDirectorySyncService {
         }
     }
 
+    static func deleteService(_ service: Service, businessCode: String) async {
+        let businessCode = cleanCode(businessCode)
+        guard !businessCode.isEmpty else { return }
+        await deleteFirestoreDocument(
+            Firestore.firestore()
+                .collection(collectionName)
+                .document(businessCode)
+                .collection("services")
+                .document(documentID(for: service.name))
+        )
+    }
+
+    static func deleteEmployee(_ employee: Employee, businessCode: String) async {
+        let businessCode = cleanCode(businessCode)
+        guard !businessCode.isEmpty else { return }
+        let stableKey = employee.email.isEmpty ? employee.name : employee.email
+        await deleteFirestoreDocument(
+            Firestore.firestore()
+                .collection(collectionName)
+                .document(businessCode)
+                .collection("employees")
+                .document(documentID(for: stableKey))
+        )
+    }
+
     @MainActor
     static func fetchPublicDirectory(
         into modelContext: ModelContext,
@@ -1954,6 +1982,22 @@ struct BusinessDirectorySyncService {
         }
     }
 
+    private static func deleteFirestoreDocument(_ reference: DocumentReference) async {
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                reference.delete { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+            }
+        } catch {
+            print("Business directory delete failed: \(error.localizedDescription)")
+        }
+    }
+
     private static func documentID(for value: String) -> String {
         let cleaned = value.lowercased().filter { $0.isLetter || $0.isNumber }
         return cleaned.isEmpty ? UUID().uuidString : cleaned
@@ -1965,6 +2009,183 @@ struct BusinessDirectorySyncService {
 
     private static func codesMatch(_ lhs: String, _ rhs: String) -> Bool {
         cleanCode(lhs).caseInsensitiveCompare(cleanCode(rhs)) == .orderedSame
+    }
+}
+
+struct AppLiveSyncService {
+    private static let businessCollection = "businessDirectory"
+
+    static func publishAppointment(_ appointment: Appointment) async {
+        let businessCode = cleanCode(appointment.businessCode)
+        guard !businessCode.isEmpty else { return }
+
+        var data: [String: Any] = [
+            "id": appointment.id.uuidString,
+            "customerName": appointment.customerName,
+            "customerEmail": appointment.customerEmail,
+            "employeeName": appointment.employeeName,
+            "serviceName": appointment.service?.name ?? "",
+            "startTime": Timestamp(date: appointment.startTime),
+            "endTime": Timestamp(date: appointment.endTime),
+            "price": appointment.price,
+            "status": appointment.status.rawValue,
+            "businessCode": businessCode,
+            "stripePaymentIntentID": appointment.stripePaymentIntentID,
+            "paidAmountCents": appointment.paidAmountCents,
+            "depositAmountCents": appointment.depositAmountCents,
+            "refundStatus": appointment.refundStatus,
+            "payoutStatus": appointment.payoutStatus,
+            "employeeEarningsCents": appointment.employeeEarningsCents,
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+        if let backendAppointmentID = appointment.backendAppointmentID {
+            data["backendAppointmentID"] = backendAppointmentID
+        }
+
+        await setData(data, path: livePath(businessCode, "appointments", appointment.id.uuidString))
+    }
+
+    static func deleteAppointment(_ appointment: Appointment) async {
+        let businessCode = cleanCode(appointment.businessCode)
+        guard !businessCode.isEmpty else { return }
+        await deleteData(path: livePath(businessCode, "appointments", appointment.id.uuidString))
+    }
+
+    static func publishWaitlistEntry(_ entry: WaitlistEntry) async {
+        let businessCode = cleanCode(entry.businessCode)
+        guard !businessCode.isEmpty else { return }
+
+        let data: [String: Any] = [
+            "id": entry.id.uuidString,
+            "clientName": entry.clientName,
+            "clientEmail": entry.clientEmail,
+            "businessCode": businessCode,
+            "businessName": entry.businessName,
+            "serviceName": entry.serviceName,
+            "preferredStartTime": Timestamp(date: entry.preferredStartTime),
+            "createdAt": Timestamp(date: entry.createdAt),
+            "status": entry.status,
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+
+        await setData(data, path: livePath(businessCode, "waitlist", entry.id.uuidString))
+    }
+
+    static func deleteWaitlistEntry(_ entry: WaitlistEntry) async {
+        let businessCode = cleanCode(entry.businessCode)
+        guard !businessCode.isEmpty else { return }
+        await deleteData(path: livePath(businessCode, "waitlist", entry.id.uuidString))
+    }
+
+    static func publishReview(_ review: Review) async {
+        let businessCode = cleanCode(review.businessCode)
+        guard !businessCode.isEmpty else { return }
+
+        let data: [String: Any] = [
+            "id": review.id.uuidString,
+            "businessCode": businessCode,
+            "reviewerName": review.reviewerName,
+            "stars": review.stars,
+            "comment": review.comment,
+            "createdAt": Timestamp(date: review.createdAt),
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+
+        await setData(data, path: livePath(businessCode, "reviews", review.id.uuidString))
+    }
+
+    static func publishNotification(_ notification: AppNotification) async {
+        let businessCode = cleanCode(notification.businessCode)
+        guard !businessCode.isEmpty || !notification.recipientName.isEmpty else { return }
+
+        let parentCode = businessCode.isEmpty ? "global" : businessCode
+        let data: [String: Any] = [
+            "id": notification.id.uuidString,
+            "audience": notification.audience,
+            "recipientName": notification.recipientName,
+            "businessCode": businessCode,
+            "title": notification.title,
+            "message": notification.message,
+            "createdAt": Timestamp(date: notification.createdAt),
+            "isRead": notification.isRead,
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+
+        await setData(data, path: livePath(parentCode, "notifications", notification.id.uuidString))
+    }
+
+    static func publishOwnerMessage(_ message: OwnerClientMessage, businessCode: String, appointmentID: UUID? = nil) async {
+        let cleanBusinessCode = cleanCode(businessCode)
+        guard !cleanBusinessCode.isEmpty else { return }
+
+        let data: [String: Any] = [
+            "id": message.id.uuidString,
+            "content": message.content,
+            "timestamp": Timestamp(date: message.timestamp),
+            "isFromOwner": message.isFromOwner,
+            "clientName": message.clientName,
+            "appointmentID": appointmentID?.uuidString ?? "",
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+
+        await setData(data, path: livePath(cleanBusinessCode, "ownerClientMessages", message.id.uuidString))
+    }
+
+    static func publishEmployeeMessage(_ message: EmployeeClientMessage, businessCode: String) async {
+        let cleanBusinessCode = cleanCode(businessCode)
+        guard !cleanBusinessCode.isEmpty else { return }
+
+        let data: [String: Any] = [
+            "id": message.id.uuidString,
+            "content": message.content,
+            "timestamp": Timestamp(date: message.timestamp),
+            "isFromEmployee": message.isFromEmployee,
+            "employeeName": message.employeeName,
+            "clientName": message.clientName,
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+
+        await setData(data, path: livePath(cleanBusinessCode, "employeeClientMessages", message.id.uuidString))
+    }
+
+    private static func livePath(_ businessCode: String, _ collection: String, _ documentID: String) -> String {
+        "\(businessCollection)/\(businessCode)/\(collection)/\(documentID)"
+    }
+
+    private static func setData(_ data: [String: Any], path: String) async {
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                Firestore.firestore().document(path).setData(data, merge: true) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+            }
+        } catch {
+            print("Live sync failed for \(path): \(error.localizedDescription)")
+        }
+    }
+
+    private static func deleteData(path: String) async {
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                Firestore.firestore().document(path).delete { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                }
+            }
+        } catch {
+            print("Live delete failed for \(path): \(error.localizedDescription)")
+        }
+    }
+
+    private static func cleanCode(_ code: String) -> String {
+        code.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
